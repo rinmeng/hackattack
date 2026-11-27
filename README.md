@@ -1,47 +1,50 @@
-# next-shadcn-supabase-starter
+# hackattack
 
-A Next.js starter with shadcn/ui, Supabase auth wiring, and Tailwind CSS v4. Clone it, add your env vars, and start building.
+A hackathon-ready Next.js starter with shadcn/ui, Supabase auth, and Tailwind CSS v4. Clone it, run two commands, and start building your idea.
 
-**Stack:** Next.js 16 · React 19 · TypeScript 7 · shadcn/ui (base-lyra, on Base UI) · Supabase · pnpm
+**Stack:** Next.js 16 · React 19 · TypeScript 7 · shadcn/ui (base-lyra, on Base UI) · Supabase · Tailwind v4 · pnpm
 
-Using AI coding agents? They read [AGENTS.md](AGENTS.md) (Claude Code reads it through `CLAUDE.md`). It holds the project's conventions, the agent-agnostic skills in `.claude/skills/` (`orchestrator`, `create-pr`), and how to plan big features in `docs/planning/` and track work in GitHub issues. Keep it up to date as your project grows.
+> Using AI coding agents? They read [AGENTS.md](AGENTS.md) (Claude Code reads it through `CLAUDE.md`). It holds the project's conventions, so your agent writes code that matches everyone else's.
 
-## Quick start
+## Get started in 5 minutes
+
+### 1. Install the prerequisites
+
+| Tool                                              | Why                                  | Check            |
+| ------------------------------------------------- | ------------------------------------ | ---------------- |
+| [Node.js 20+](https://nodejs.org)                 | Runs Next.js                         | `node -v`        |
+| [pnpm](https://pnpm.io/installation)              | Package manager (don't use npm/yarn) | `pnpm -v`        |
+| [Docker Desktop](https://docs.docker.com/desktop) | Only needed for local Supabase       | `docker info`    |
+| [GitHub CLI](https://cli.github.com) (optional)   | Opening PRs and issues from terminal | `gh auth status` |
+
+No pnpm yet? Run `corepack enable` (ships with Node) or `npm install -g pnpm`.
+
+### 2. Clone and run
 
 ```bash
-git clone https://github.com/web-8th/next-shadcn-supabase-starter.git
-cd next-shadcn-supabase-starter
+git clone https://github.com/rinmeng/hackattack.git
+cd hackattack
 pnpm install
 pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The UI runs without Supabase, so frontend work can start right away. To enable auth and data, set up Supabase locally or use a hosted project.
+Open [http://localhost:3000](http://localhost:3000). The UI runs without Supabase, so frontend work can start right away.
 
-### Local Supabase
+### 3. (Optional) Turn on the database and auth
 
-Requires Docker.
+Only needed once you want login or stored data. With Docker running:
 
 ```bash
-pnpm db:start   # starts Supabase, applies supabase/migrations/, runs supabase/seed.sql
+pnpm db:start   # starts Supabase, applies migrations, seeds a test user
 ```
 
-Then write the local URL and keys into `.env.local`. This replaces the whole file, which is fine because these three values are all it needs:
+Write the local keys into `.env.local` (this replaces the file, which is fine since these three values are all it needs):
 
 ```bash
 pnpm exec supabase status -o env --override-name api.url=NEXT_PUBLIC_SUPABASE_URL --override-name auth.publishable_key=NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY --override-name auth.secret_key=SUPABASE_SECRET_KEY | grep -E "^(NEXT_PUBLIC_SUPABASE|SUPABASE_SECRET)" > .env.local
 ```
 
-Restart `pnpm dev` after changing `.env.local`. The file should look like:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54721
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY=sb_publishable_...
-SUPABASE_SECRET_KEY=sb_secret_...
-```
-
-The publishable key is used in the browser and acts as the signed-in user, so RLS applies. The secret key is server-only and bypasses RLS. Use it only through `createAdminClient()` from `utils/supabase/admin.ts`.
-
-To turn auth on, set `AUTH_ENABLED = true` in `config/auth.ts`. Then log in with the seeded user:
+Then set `AUTH_ENABLED = true` in `config/auth.ts`, restart `pnpm dev`, and log in with the seeded user:
 
 | Email               | Password      |
 | ------------------- | ------------- |
@@ -49,31 +52,113 @@ To turn auth on, set `AUTH_ENABLED = true` in `config/auth.ts`. Then log in with
 
 | Service                                | URL                                              |
 | -------------------------------------- | ------------------------------------------------ |
-| Supabase Studio                        | [http://127.0.0.1:54723](http://127.0.0.1:54723) |
+| App                                    | [http://localhost:3000](http://localhost:3000)   |
+| Supabase Studio (browse tables)        | [http://127.0.0.1:54723](http://127.0.0.1:54723) |
 | Email inbox (auth emails sent locally) | [http://127.0.0.1:54724](http://127.0.0.1:54724) |
 
-Run `pnpm db:status` to see the keys again, or `pnpm db:reset` to rebuild the database from migrations and seed.
+That's it, you're set up. The rest of this README is reference.
 
-Local Supabase runs on the **547xx** ports (API 54721, DB 54722, Studio 54723, email 54724) rather than the default 543xx, so it doesn't collide with other Supabase projects on your machine.
+## Team workflow
 
-**"port is already allocated"**: something else is using one of those ports, often another project's local Supabase. Stop it with `pnpm exec supabase stop --project-id <other-project>` (`docker ps` shows the names), or change the ports in `supabase/config.toml`.
+With several people pushing to one repo over a weekend, a few habits keep merges painless:
 
-### Hosted Supabase
+1. **Pull first:** `git pull origin main`
+2. **Branch per feature:** `git checkout -b feature/leaderboard` (prefixes: `feature/`, `fix/`, `chore/`)
+3. **Check before pushing:** `pnpm format && pnpm check`
+4. **Commit with Conventional Commits:** `feat: add leaderboard page`, `fix(auth): redirect after logout`
+5. **Open a PR** into `main` and link the issue with `Closes #12`
 
-```bash
-cp .env.example .env.local
+Tips:
+
+- Claim work in a GitHub issue (use the Task template) so two people don't build the same thing.
+- Keep edits to shared files (`components/Navbar.tsx`, `app/layout.tsx`, `lib/types/`) small. Those are where conflicts happen.
+- Pull right before creating a migration so its timestamp comes after everyone else's.
+- Check `package.json` before adding a dependency. zod, react-hook-form, date-fns, recharts, lucide-react, and sonner are already installed.
+
+## Folder structure
+
+```text
+hackattack/
+├── app/                      # Pages and layouts (Next.js App Router)
+│   ├── layout.tsx            #   Root layout: providers, Navbar, metadata
+│   ├── page.tsx              #   Home page (/)
+│   ├── globals.css           #   Tailwind v4 theme (colors, dark mode, animations)
+│   ├── login/                #   /login
+│   ├── admin/                #   /admin (protected when auth is on)
+│   ├── features/             #   Demo page, delete when you start
+│   └── tech-stack/           #   Demo page, delete when you start
+├── components/               # Reusable app components
+│   ├── ui/                   #   shadcn/ui components (don't edit by hand)
+│   ├── Navbar.tsx            #   Top nav and navLinks
+│   ├── Text.tsx              #   Typography: <Text variant='hd-lg'>
+│   ├── EmptyState.tsx        #   Empty-state wrapper
+│   ├── UserButton.tsx        #   Signed-in user name + logout
+│   ├── Logo.tsx
+│   ├── ModeToggle.tsx        #   Light/dark toggle
+│   └── theme-provider.tsx
+├── config/
+│   └── auth.ts               # AUTH_ENABLED flag
+├── contexts/                 # React context providers (Auth, Toast)
+├── hooks/                    # useAuth, useToast, useMobile, ...
+├── lib/
+│   ├── types/                # Shared TypeScript types (import from '@/lib/types')
+│   │   └── database.ts       #   Generated from the DB schema, don't edit
+│   ├── durations.ts          # Toast durations
+│   └── utils.ts              # cn() helper
+├── utils/
+│   ├── supabase/             # Supabase clients: client, server, admin, proxy, env
+│   ├── animations.ts         # getDelayClass() for staggered animations
+│   └── user.ts               # getDisplayName()
+├── supabase/
+│   ├── config.toml           # Local Supabase config (ports 547xx)
+│   ├── migrations/           # SQL schema changes, one timestamped file each
+│   └── seed.sql              # Local-only test data (seeded admin user)
+├── public/                   # Static files (images, icons)
+├── docs/
+│   ├── examples/             # Copy-paste examples (table + RLS policies)
+│   └── planning/             # Plans for big features
+├── scripts/                  # Repo scripts (db-types.mjs)
+├── .claude/skills/           # Agent workflows (orchestrator, create-pr)
+├── .github/                  # CI workflows, PR template, issue template
+├── proxy.ts                  # Session refresh + route protection
+├── AGENTS.md                 # Conventions for AI coding agents
+└── .env.example              # Env vars template
 ```
 
-Fill in the three values from [Project Settings → API Keys](https://supabase.com/dashboard/project/_/settings/api-keys). Then push your migrations:
+**Where do I put…**
 
-```bash
-pnpm exec supabase link --project-ref <ref>
-pnpm exec supabase db push
-```
+| Thing                    | Location                                                     |
+| ------------------------ | ------------------------------------------------------------ |
+| A new page               | `app/<route>/page.tsx`                                       |
+| A reusable component     | `components/MyThing.tsx`                                     |
+| A shadcn component       | `pnpm dlx shadcn@latest add <name>` → `components/ui/`       |
+| A custom hook            | `hooks/use-my-thing.ts`                                      |
+| A TypeScript type        | `lib/types/<feature>.ts`, re-exported from `lib/types/index` |
+| A database table         | `pnpm exec supabase migration new <name>`                    |
+| Images and static assets | `public/`                                                    |
+| Theme colors / dark mode | `app/globals.css` (there is no `tailwind.config.js`)         |
+| A new env var            | `.env.local`, and document it in `.env.example`              |
 
-The seed is local-only, so create users in the dashboard under Authentication → Users.
+## Scripts
 
-The app expects the publishable key name above, not `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
+| Command               | What it does                                         |
+| --------------------- | ---------------------------------------------------- |
+| `pnpm dev`            | Start the dev server                                 |
+| `pnpm build`          | Production build                                     |
+| `pnpm start`          | Run the production server                            |
+| `pnpm check`          | Format check + lint + typecheck (what CI runs)       |
+| `pnpm lint`           | oxlint                                               |
+| `pnpm format`         | Prettier (write)                                     |
+| `pnpm format:check`   | Prettier (check only)                                |
+| `pnpm typecheck`      | `tsc --noEmit` (TypeScript 7)                        |
+| `pnpm db:start`       | Start local Supabase (Docker)                        |
+| `pnpm db:stop`        | Stop local Supabase                                  |
+| `pnpm db:status`      | Show local URLs and keys                             |
+| `pnpm db:reset`       | Rebuild local DB from migrations + seed (wipes data) |
+| `pnpm db:types`       | Regenerate `lib/types/database.ts` from local DB     |
+| `pnpm db:types:check` | Fail if `database.ts` doesn't match the local DB     |
+
+CI runs format check, lint, typecheck, and build on every push and PR (`.github/workflows/ci.yml`). When migrations change, `.github/workflows/db-types.yml` also checks the generated types.
 
 ## Database
 
@@ -86,9 +171,7 @@ pnpm exec supabase migration up                  # applies it locally, keeps you
 pnpm db:types                                    # regenerates lib/types/database.ts
 ```
 
-`lib/types/database.ts` describes your schema in TypeScript. Every Supabase client is typed with it, so `supabase.from('todos')` autocompletes and a wrong table or column name fails `pnpm typecheck`. The file is generated, so don't edit it by hand. Rerun `pnpm db:types` after every migration and commit the result. The `Database types` CI workflow fails the PR if it doesn't match the migrations; `pnpm db:types:check` runs the same check locally.
-
-[docs/examples/profiles-table.md](docs/examples/profiles-table.md) has a complete example table with RLS policies and a sign-up trigger to copy from.
+Every table needs `enable row level security` plus policies, or nobody (or everybody) can read it. [docs/examples/profiles-table.md](docs/examples/profiles-table.md) has a complete example to copy from. Commit the regenerated `lib/types/database.ts` with your migration.
 
 ### Which Supabase client to use
 
@@ -100,92 +183,64 @@ pnpm db:types                                    # regenerates lib/types/databas
 | Privileged server work that bypasses RLS         | `createAdminClient()` from `@/utils/supabase/admin`   |
 | Current user in Client Components                | `useAuth()` from `@/hooks/use-auth`                   |
 
-## Scripts
+The publishable key runs in the browser and acts as the signed-in user, so RLS applies. The secret key is server-only and bypasses RLS. Use it only through `createAdminClient()`.
 
-| Command               | What it does                                     |
-| --------------------- | ------------------------------------------------ |
-| `pnpm dev`            | Start the dev server                             |
-| `pnpm build`          | Production build                                 |
-| `pnpm start`          | Run the production server                        |
-| `pnpm check`          | Format check + lint + typecheck (what CI runs)   |
-| `pnpm lint`           | oxlint                                           |
-| `pnpm format`         | Prettier (write)                                 |
-| `pnpm format:check`   | Prettier (check only)                            |
-| `pnpm typecheck`      | `tsc --noEmit` (TypeScript 7)                    |
-| `pnpm db:start`       | Start local Supabase (Docker)                    |
-| `pnpm db:stop`        | Stop local Supabase                              |
-| `pnpm db:status`      | Show local URLs and keys                         |
-| `pnpm db:reset`       | Rebuild local DB from migrations + seed          |
-| `pnpm db:types`       | Regenerate `lib/types/database.ts` from local DB |
-| `pnpm db:types:check` | Fail if `database.ts` doesn't match the local DB |
+### Hosted Supabase
 
-CI runs format check, lint, typecheck, and build on push/PR via `.github/workflows/ci.yml`. When migrations or `database.ts` change, `.github/workflows/db-types.yml` also checks that the generated types match the migrations.
-
-## shadcn/ui
-
-Components live in `components/ui/`. Most of the usual set is already installed.
-
-Add more:
+To share one database across the team or deploy:
 
 ```bash
-pnpm dlx shadcn@latest add [component]
+cp .env.example .env.local
 ```
 
-This project uses the **base-lyra** style, which is built on [Base UI](https://base-ui.com), not Radix. Most shadcn docs and examples online are written for Radix, so two things differ:
+Fill in the three values from [Project Settings → API Keys](https://supabase.com/dashboard/project/_/settings/api-keys), then push your migrations:
 
-- **No `asChild`.** To render a component as another element, pass it through `render`:
-
-  ```tsx
-  // Do
-  <Button nativeButton={false} render={<Link href='/about' />}>About</Button>
-  <DialogTrigger render={<Button variant='outline' />}>Open</DialogTrigger>
-  
-  // Don't (Radix API, doesn't work here)
-  <Button asChild><Link href='/about'>About</Link></Button>
-  ```
-
-- **`nativeButton={false}`** goes on a `Button` whenever `render` makes it something other than a `<button>` (a link, for example). This turns off native-button behavior that only applies to a real `<button>`.
-
-Newer components (questionnaire, bubble, message, etc.) import `cn` from the [`cn`](https://github.com/shadcn-ui/cn) package. App code can use `@/lib/utils`, which re-exports the same thing.
-
-## Project layout
-
-```text
-app/              Pages and layouts (App Router)
-components/       App components + components/ui/ (shadcn)
-config/           App flags (AUTH_ENABLED)
-contexts/         AuthProvider, ToastProvider
-docs/examples/    Reference snippets (example migration)
-docs/planning/    One folder per big feature: plan, progress, task briefs
-scripts/          Repo scripts (db-types.mjs)
-.claude/skills/   Agent-agnostic workflows (orchestrator, create-pr)
-.github/          CI workflows, PR template, Task issue template
-hooks/            use-auth, use-toast, use-mobile
-lib/              Types (incl. generated database.ts), utils
-utils/supabase/   Browser, server, admin, and proxy Supabase clients
-supabase/         Local Supabase config, migrations, seed
-proxy.ts          Session refresh + route protection
+```bash
+pnpm exec supabase link --project-ref <ref>
+pnpm exec supabase db push
 ```
 
-Auth follows a simple pattern: context in `contexts/`, hook in `hooks/`, types in `lib/types/`. Providers are wired up in `app/layout.tsx`.
+The seed is local-only, so create users in the dashboard under Authentication → Users. The app expects `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY`, not `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
 
-## Remove demo content
+## shadcn/ui (Base UI, not Radix)
 
-The starter ships with demo pages and branding. Before you build your own app:
+Components live in `components/ui/`, and most of the usual set is installed. Add more with `pnpm dlx shadcn@latest add <component>`.
+
+This project uses the **base-lyra** style, built on [Base UI](https://base-ui.com). Most shadcn examples online use Radix, so watch for two differences:
+
+- **No `asChild`.** Pass the element through `render` instead.
+- **Add `nativeButton={false}`** when `render` turns a `Button` into a link or other non-button.
+
+```tsx
+// Do
+<Button nativeButton={false} render={<Link href='/about' />}>About</Button>
+<DialogTrigger render={<Button variant='outline' />}>Open</DialogTrigger>
+
+// Don't (Radix API, doesn't work here)
+<Button asChild><Link href='/about'>About</Link></Button>
+```
+
+## Troubleshooting
+
+- **"port is already allocated"** when running `pnpm db:start`: another local Supabase is probably running. Find it with `docker ps` and stop it with `pnpm exec supabase stop --project-id <other-project>`, or change the ports in `supabase/config.toml`.
+- **Auth doesn't work:** check that `.env.local` has all three values, `AUTH_ENABLED` is `true`, and you restarted `pnpm dev`.
+- **Typecheck fails after pulling:** someone added a migration. Run `pnpm exec supabase migration up`, then `pnpm db:types`.
+- **`supabase migration up` reports out-of-order migrations:** ask the team before running `pnpm db:reset`, since it wipes your local data.
+
+## Make it yours
+
+Before demo day:
 
 - [ ] Replace `app/page.tsx` with your landing page
 - [ ] Delete `app/features/` and `app/tech-stack/`, and remove them from `navLinks` in `components/Navbar.tsx`
-- [ ] Rename "Next Starter" and swap the logos in `components/Logo.tsx`. Delete `public/rmlogov2.png`, `public/icons/8th_svg.svg`, and any other `public/icons/*` you don't use.
+- [ ] Swap the name and logos in `components/Logo.tsx`, and remove unused files in `public/`
 - [ ] Replace `app/favicon.ico`
-- [ ] Update `title` and `description` in `metadata` in `app/layout.tsx`
-- [ ] Replace the demo copy and GitHub link in `app/admin/page.tsx`, or delete the page and remove `/admin` from `proxy.ts`
-- [ ] Update `name` in `package.json` and `project_id` in `supabase/config.toml`
-- [ ] Rewrite this README for your project, and check that AGENTS.md still matches it
-- [ ] Remove `lib/highlighter.tsx`, `hooks/use-highlighted-code.ts`, and `shiki` if you don't show code snippets
+- [ ] Update `title` and `description` in `app/layout.tsx`
+- [ ] Update or delete `app/admin/page.tsx` (and `/admin` in `proxy.ts`)
 
 ## Deploy
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/web-8th/next-shadcn-supabase-starter)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/rinmeng/hackattack)
 
 Set the same three Supabase env vars in your host's dashboard. In Supabase, under Authentication → URL Configuration, set the Site URL to your deployed URL.
 
