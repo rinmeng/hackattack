@@ -60,9 +60,11 @@ localStorage.
 
 ## Plan
 
-1. [ ] Collector: Swift helper, Node SSE server, mock source
-2. [ ] Detection library: types, constants, ring buffer, detector
-3. [ ] `/wifi` page: hook, components, alerts, Navbar link
+All three steps are on one branch, `feature/afterlife-wifi-sense`, as separate commits.
+
+1. [x] Collector: Swift helper, Node SSE server, mock source
+2. [x] Detection library: types, constants, ring buffer, detector
+3. [x] `/wifi` page: hook, components, alerts, Navbar link
 
 ## Decisions
 
@@ -70,6 +72,24 @@ localStorage.
 - 2026-11-28: all work in new files. The only edits to existing files are one line in
   `components/Navbar.tsx` and one in `lib/types/index.ts`, so this never conflicts with
   other teams' ideas.
+- 2026-11-28: a single RSSI jump of more than 8 dB restarts the score window. Without
+  it, a sudden level change (roaming, band switch) read as spread and raised a false
+  MOTION for a couple of seconds before `link_changed` fired.
+- 2026-11-28: "fresh reading" means RSSI or noise changed. A frozen driver repeats both,
+  but a quiet room can legitimately hold the same RSSI for a few seconds.
+- 2026-11-28: the setting is "threshold scale" (T multiplier, 0.5x to 2x) rather than
+  "sensitivity", so that a higher number never means a less sensitive alarm by surprise.
+- 2026-11-28: mock mode gets `POST /mock/scene` so calibration in mock mode sees a quiet
+  room and then outside motion, as a real user would produce.
+
+## Results (2026-11-28)
+
+- Real CoreWLAN on the dev MacBook: ~17 samples/s but only 1 to 1.4 distinct values/s,
+  so the slow-update hint shows and detection lags by a few seconds.
+- Mock run in the browser: empty room gave mu 0.28, sigma 0.13; outside step gave p95
+  1.09, so T = 1.31. 12 s of outside motion: no trigger. Inside motion: MOTION, plus an
+  alert (inside quiet hours). A 12 dB shift gave `link_changed`, not MOTION. A dropped
+  link gave `disconnected` then `reconnected`.
 
 ## Open questions
 
@@ -78,7 +98,8 @@ localStorage.
 
 ## Done when
 
-- [ ] Mock mode shows MOTION during inside bursts and CLEAR otherwise once calibrated
-- [ ] With the collector stopped, the page shows the start command and reconnects
-- [ ] `pnpm check` and `pnpm build` pass
-- [ ] `git diff --stat main...HEAD` shows only new files plus the two one-line edits
+- [x] Mock mode shows MOTION during inside bursts and CLEAR otherwise once calibrated
+- [x] With the collector stopped, the page shows the start command and reconnects
+- [x] `pnpm check` and `pnpm build` pass
+- [x] `git diff --stat main...HEAD` shows only new files plus the two one-line edits
+- [ ] Walk test on a real MacBook with a router in access point mode
