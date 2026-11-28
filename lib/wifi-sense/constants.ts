@@ -105,8 +105,6 @@ export const RECONNECT_FACTOR = 2;
 export const SNAPSHOT_INTERVAL_MS = 125;
 /** How often to poll /health for Diagnostics. */
 export const HEALTH_POLL_MS = 2_000;
-/** Re-check staleness even when no samples arrive. */
-export const TICK_INTERVAL_MS = 500;
 
 /** Chart shows the last 60 s. */
 export const CHART_WINDOW_MS = 60_000;
@@ -120,6 +118,8 @@ export const CHART_HEIGHT_PX = 320;
 export const CHART_PADDING_PX = 8;
 export const CHART_LINE_WIDTH_PX = 1.5;
 export const CHART_FONT_PX = 11;
+/** Dash pattern for the threshold line (px on, px off). */
+export const CHART_DASH = [4, 4];
 /** Shading opacity for MOTION periods. */
 export const CHART_MOTION_ALPHA = 0.18;
 
@@ -148,6 +148,7 @@ export const DISPLAY_DECIMALS = 2;
 export const CHART_GAP_MS = 1_500;
 
 export const MINUTES_PER_HOUR = 60;
+export const PERCENT = 100;
 export const MS_PER_SECOND = 1_000;
 
 // ---------------------------------------------------------------------------------
