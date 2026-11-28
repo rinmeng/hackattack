@@ -349,12 +349,29 @@ export const PLOT_PAD_RIGHT = 8;
 export const PLOT_PAD_TOP = 18;
 export const PLOT_PAD_BOTTOM = 22;
 
+/** Gap between an axis and its labels, and offset of panel titles, CSS px. */
+export const PLOT_LABEL_GAP = 4;
+export const PLOT_TITLE_OFFSET = 2;
+
+/** Room reserved for one legend entry on the velocity trace, CSS px. */
+export const PLOT_LEGEND_WIDTH = 70;
+
 /** Canvas label font size, CSS px. */
 export const PLOT_FONT_PX = 10;
 
 /** Opacity of shaded regions and faint lines on the canvases. */
 export const PLOT_SHADE_ALPHA = 0.15;
 export const PLOT_FAINT_ALPHA = 0.45;
+
+/** Dash pattern for tone R's line, so the tones are told apart without colour. */
+export const TONE_R_DASH: readonly number[] = [6, 4];
+
+/** Dash pattern for reference lines (threshold, tone marker). */
+export const REFERENCE_DASH: readonly number[] = [3, 3];
+
+/** Line widths, CSS px. */
+export const PLOT_LINE_WIDTH = 1.5;
+export const PLOT_THIN_LINE_WIDTH = 1;
 
 /** Height of the per-tone "moving" strip on the velocity trace, CSS px. */
 export const TRACE_MOVING_STRIP_PX = 4;

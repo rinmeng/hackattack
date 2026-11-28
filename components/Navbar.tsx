@@ -34,6 +34,7 @@ const navLinks = [
   { href: '/', label: 'Home' },
   { href: '/features', label: 'Features' },
   { href: '/tech-stack', label: 'Tech Stack' },
+  { href: '/sonar', label: 'Sonar' },
   { href: '/admin', label: 'Admin' },
 ];
 
