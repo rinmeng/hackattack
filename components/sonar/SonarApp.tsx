@@ -146,6 +146,7 @@ export function SonarApp() {
         calibration={sonar.calibration}
         counters={sonar.counters}
         log={sonar.log}
+        settings={sonar.settings}
       />
     </div>
   );

@@ -7,7 +7,7 @@ import type {
   SonarCounters,
   SonarDebugSnapshot,
   SonarLogEntry,
-  SonarLogKind,
+  SonarSettings,
   ToneId,
 } from '@/lib/types';
 import { TONE_IDS } from '@/lib/sonar/constants';
@@ -22,25 +22,15 @@ import {
 } from '@/components/ui';
 import { Text } from '@/components/Text';
 
+import { SonarCopyBlock } from './SonarCopyBlock';
+
 interface SonarDebugProps {
   debug: SonarDebugSnapshot | null;
   calibration: CalibrationResult | null;
   counters: SonarCounters;
   log: SonarLogEntry[];
+  settings: SonarSettings;
 }
-
-const LOG_KIND_VARIANT: Record<
-  SonarLogKind,
-  'default' | 'secondary' | 'destructive' | 'outline'
-> = {
-  trigger: 'default',
-  ambiguous: 'secondary',
-  noise: 'destructive',
-  suppressed: 'destructive',
-  burst: 'outline',
-  calibration: 'secondary',
-  info: 'outline',
-};
 
 function fmt(value: number | null | undefined, digits = 1): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
@@ -54,6 +44,79 @@ function formatClock(at: number): string {
     d.getMilliseconds(),
     3
   )}`;
+}
+
+/** Log as plain text, oldest first, one entry per line. */
+function formatLog(log: SonarLogEntry[]): string {
+  return log
+    .slice()
+    .reverse()
+    .map((entry) => `${formatClock(entry.at)}  ${entry.kind.padEnd(11)} ${entry.message}`)
+    .join('\n');
+}
+
+/** Everything needed to tune remotely, as plain text. */
+function formatDiagnostics(
+  debug: SonarDebugSnapshot | null,
+  calibration: CalibrationResult | null,
+  counters: SonarCounters,
+  settings: SonarSettings
+): string {
+  if (!debug && !calibration) return '';
+  const lines: string[] = [];
+  lines.push(
+    `settings: ${Object.entries(settings)
+      .map(([key, value]) => `${key}=${value}`)
+      .join(' ')}`
+  );
+  if (debug) {
+    lines.push(
+      `audio: sampleRate=${debug.sampleRate} binWidth=${fmt(debug.binWidth, 2)} fftSize=${
+        debug.fftSize
+      } fps=${fmt(debug.fps, 0)} guardZ=${fmt(debug.guardZ)} calibration=${
+        debug.calibrationPhase
+      }`
+    );
+    lines.push(
+      `mic: ${Object.entries(debug.track)
+        .map(([key, value]) => `${key}=${value}`)
+        .join(' ')}`
+    );
+  }
+  lines.push(
+    `counts: left=${counters.left} right=${counters.right} ambiguous=${counters.ambiguous} suppressed=${counters.suppressed} noise=${counters.noise}`
+  );
+  for (const id of TONE_IDS) {
+    const base = calibration?.baseline.tones[id];
+    if (base) {
+      lines.push(
+        `baseline ${id}: left=${fmt(base.leftMean, 2)}±${fmt(base.leftStd, 2)} right=${fmt(
+          base.rightMean,
+          2
+        )}±${fmt(base.rightStd, 2)} energy=${fmt(base.energyMean, 4)}±${fmt(
+          base.energyStd,
+          4
+        )} snr=${fmt(calibration?.snrDb[id])}dB`
+      );
+    }
+    const tone = debug?.tones[id];
+    if (tone) {
+      lines.push(
+        `live ${id}: hz=${fmt(tone.toneHz, 0)} peak=${fmt(tone.peakHz, 0)}Hz/${fmt(
+          tone.peakDb
+        )}dB bins=${tone.leftBins}/${tone.rightBins} dL=${fmt(tone.dL)} dR=${fmt(
+          tone.dR
+        )} zE=${fmt(tone.zE)} v=${fmt(tone.velocity, 2)}m/s moving=${tone.moving}`
+      );
+    }
+  }
+  if (calibration && calibration.sweep.length > 0) {
+    lines.push(
+      `sweep: ${calibration.sweep.map((c) => `${c.hz}:${fmt(c.snrDb, 0)}`).join(' ')}`
+    );
+  }
+  if (calibration?.warning) lines.push(`warning: ${calibration.warning}`);
+  return lines.join('\n');
 }
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -111,8 +174,16 @@ function ToneColumn({
 }
 
 /** Live numbers and the event log, for tuning on real hardware. */
-export function SonarDebug({ debug, calibration, counters, log }: SonarDebugProps) {
+export function SonarDebug({
+  debug,
+  calibration,
+  counters,
+  log,
+  settings,
+}: SonarDebugProps) {
   const track = debug ? Object.entries(debug.track) : [];
+  const diagnostics = formatDiagnostics(debug, calibration, counters, settings);
+  const logText = formatLog(log);
 
   return (
     <Collapsible>
@@ -185,41 +256,16 @@ export function SonarDebug({ debug, calibration, counters, log }: SonarDebugProp
                 </div>
               </div>
             )}
-            <div className='flex flex-col gap-1'>
-              <Text variant='label' size='sm'>
-                Event log
-              </Text>
-              <div
-                className='flex max-h-64 flex-col gap-1 overflow-y-auto border
-                  border-border p-2'
-                aria-live='polite'
-              >
-                {log.length === 0 ? (
-                  <Text variant='muted' size='xs'>
-                    Nothing yet.
-                  </Text>
-                ) : (
-                  log.map((entry) => (
-                    <div key={entry.id} className='flex items-start gap-2'>
-                      <Text
-                        as='span'
-                        variant='muted'
-                        size='xs'
-                        className='shrink-0 font-mono tabular-nums'
-                      >
-                        {formatClock(entry.at)}
-                      </Text>
-                      <Badge variant={LOG_KIND_VARIANT[entry.kind]} className='shrink-0'>
-                        {entry.kind}
-                      </Badge>
-                      <Text as='span' size='xs'>
-                        {entry.message}
-                      </Text>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            <SonarCopyBlock
+              title='Diagnostics (settings, calibration, live numbers)'
+              value={diagnostics}
+              emptyText='Start the sonar to collect diagnostics.'
+            />
+            <SonarCopyBlock
+              title={`Event log (${log.length}, oldest first)`}
+              value={logText}
+              emptyText='Nothing yet.'
+            />
           </CollapsibleContent>
         </CardContent>
       </Card>
