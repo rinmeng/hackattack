@@ -1,0 +1,5 @@
+# Workflows hold the secrets and decide what the agents may do, so the repo owner reviews them.
+# Takes effect with "Require review from Code Owners" on main (docs/github-setup.md).
+/.github/                 @rinmeng
+/AGENTS.md                @rinmeng
+/.claude/                 @rinmeng

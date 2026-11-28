@@ -1,0 +1,39 @@
+# Branch and title conventions from AGENTS.md. Cheap, needs no install and no token.
+name: pr-hygiene
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: pr-hygiene-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Branch is prefixed
+        env:
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          grep -Eq '^(feature|fix|chore|docs|ci|refactor|claude|dependabot)/.+$' <<< "$BRANCH" || {
+            echo "::error::Branch '$BRANCH' must start with feature/, fix/, chore/, docs/, ci/ or refactor/ (claude/ and dependabot/ are for bots)."; exit 1; }
+
+      - name: Title is a Conventional Commit
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          grep -Eq '^(feat|fix|chore|docs|style|refactor|ci|test|perf|build|revert)(\([a-z0-9._/-]+\))?!?: [^[:space:]A-Z].*[^.]$' <<< "$TITLE" || {
+            echo "::error::Title '$TITLE' must look like 'feat(scope): add thing' (lowercase, imperative, no trailing period)."; exit 1; }
+
+      - name: Agent PRs link their issue
+        if: startsWith(github.head_ref, 'claude/')
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          grep -Eiq '(closes|fixes|resolves) #[0-9]+' <<< "$BODY" || {
+            echo "::error::Agent PR bodies must say 'Closes #<issue number>'."; exit 1; }

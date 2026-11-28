@@ -1,3 +1,8 @@
+# CI. Make the `ci` job the one required status check: it is green only when every layer
+# that had to run passed. Layers that a change can't affect are skipped, not failed:
+#   static    format, lint, typecheck: always (Prettier also checks Markdown)
+#   build     `next build` with no Supabase env vars: skipped for docs-only changes
+#   db-types  lib/types/database.ts matches supabase/migrations/: only when those can change
 name: CI
 
 on:
@@ -5,44 +10,95 @@ on:
     branches: [main]
   pull_request:
 
+# Every job asks for what it needs; nothing gets a write token.
+permissions: {}
+
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # Superseded PR runs are cancelled. Runs on main always finish, so main never loses a result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NEXT_TELEMETRY_DISABLED: 1
 
 jobs:
-  checks:
-    name: Format, Lint, Typecheck & Build
+  changes:
+    name: Detect changed areas
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+      db: ${{ steps.diff.outputs.db }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 22
-          cache: pnpm
+          fetch-depth: 0
+          filter: blob:none # history and trees only; enough for `git diff --name-only`
+          persist-credentials: false
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Which areas changed
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          # A PR is checked out as its merge commit, whose first parent is the base branch tip.
+          if [ "$EVENT" = pull_request ]; then base=$(git rev-parse HEAD^1); else base="$BEFORE"; fi
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "No usable base commit; running everything."
+            { echo "code=true"; echo "db=true"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$base" HEAD)
+          printf 'Changed files:\n%s\n' "$files"
 
+          docs='^(docs/.*|.*\.md|LICENSE|\.vscode/.*|\.zed/.*|\.github/ISSUE_TEMPLATE/.*)$'
+          db='^(supabase/.*|lib/types/database\.ts|scripts/db-types\.mjs|package\.json|pnpm-lock\.yaml|\.github/workflows/ci\.yml|\.github/actions/setup/.*)$'
+
+          code=false; [ -n "$(grep -vE "$docs" <<< "$files" || true)" ] && code=true
+          dbc=false;  [ -n "$(grep -E "$db" <<< "$files" || true)" ] && dbc=true
+          echo "code=$code db=$dbc"
+          { echo "code=$code"; echo "db=$dbc"; } >> "$GITHUB_OUTPUT"
+
+  static:
+    name: Format, lint & typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
       - name: Check formatting
         run: pnpm format:check
-
       - name: Lint
         run: pnpm lint
-
       - name: Typecheck
         run: pnpm typecheck
 
-      # Turbopack's build cache. Each run saves a new entry keyed by commit and restores
-      # the latest one for the same lockfile, so builds start warm.
-      - name: Cache Next.js build
-        uses: actions/cache@v4
+  build:
+    name: Build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+
+      # Turbopack's build cache. PRs only restore it; main saves it. One entry per main commit
+      # instead of one per PR push keeps the 10 GB cache budget for the pnpm store.
+      - name: Restore Next.js build cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .next/cache
           key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
@@ -52,3 +108,47 @@ jobs:
       # No Supabase env vars here: the app must build without them.
       - name: Build
         run: pnpm build
+
+      - name: Save Next.js build cache
+        if: github.event_name == 'push'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+
+  db-types:
+    name: Check database.ts matches migrations
+    needs: changes
+    if: needs.changes.outputs.db == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+      # Starts only Postgres and applies supabase/migrations/.
+      - name: Start local database
+        run: pnpm exec supabase db start
+      - name: Check generated types
+        run: pnpm db:types:check
+
+  # The one required status check.
+  ci:
+    name: ci
+    if: always()
+    needs: [changes, static, build, db-types]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: All layers passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in success|skipped) ;; *) echo "::error::a CI layer did not pass ($r)"; exit 1 ;; esac
+          done

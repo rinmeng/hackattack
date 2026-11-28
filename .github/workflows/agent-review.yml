@@ -1,0 +1,279 @@
+# Agent review. Claude reviews every ready (non-draft) PR against its issue's "Done when" list and
+# the rules in AGENTS.md, then APPROVES it or REQUESTS CHANGES as a real GitHub review.
+#
+#   prepare      decides whether to run; sets the `agent-review` commit status to pending
+#   review       read-only: no write token, no Bash. Gets the PR as plain files, writes review.md
+#                and verdict.txt, uploads them
+#   review-gate  the only job that can write: posts the approve / request-changes review, sets the
+#                review:pass / review:changes label and the `agent-review` commit status
+#
+# Make the `agent-review` commit status a required check (it lands on the PR's head commit even
+# when a /review comment started the run). Setup: docs/github-setup.md.
+#
+# Manual controls (need ENABLE_AGENTS=true and the CLAUDE_CODE_OAUTH_TOKEN secret):
+#   • Labels `review:request` / `review:rerequest` (removed when the run starts)
+#   • PR comment whose first line is `/review` or `/rereview`, from someone with write access
+#   • workflow_dispatch with pr_number (optional rereview: true)
+name: agent-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: number
+      rereview:
+        description: Re-review (full diff; focus on prior findings)
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+env:
+  # Named one by one: this repo is public and allowed bots are not checked for write access.
+  TRUSTED_BOTS: 'claude[bot]'
+  STATUS_CONTEXT: agent-review
+
+concurrency:
+  # Unrelated comments and labels get a group of their own, so they never cancel a running review.
+  group: >-
+    agent-review-${{
+      ((github.event_name == 'issue_comment' && !startsWith(github.event.comment.body, '/review') && !startsWith(github.event.comment.body, '/rereview')) ||
+       (github.event.action == 'labeled' && github.event.label.name != 'review:request' && github.event.label.name != 'review:rerequest'))
+      && github.run_id
+      || github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    # Cheap filter first: most comments and labels never start a runner.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request &&
+       (startsWith(github.event.comment.body, '/review') || startsWith(github.event.comment.body, '/rereview'))) ||
+      (github.event_name == 'pull_request' &&
+       (github.event.action != 'labeled' || github.event.label.name == 'review:request' || github.event.label.name == 'review:rerequest'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write # labels
+      issues: write # PR comments
+      statuses: write # pending status on the head commit
+    outputs:
+      pr: ${{ steps.meta.outputs.pr }}
+      head: ${{ steps.meta.outputs.head }}
+      rereview: ${{ steps.meta.outputs.rereview }}
+      gate: ${{ steps.meta.outputs.gate }}
+    steps:
+      - name: Decide whether to run and which PR
+        id: meta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT: ${{ github.event_name }}
+          ENABLED: ${{ vars.ENABLE_AGENTS }}
+          HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          PR_INPUT: ${{ inputs.pr_number }}
+          REREVIEW_INPUT: ${{ inputs.rereview }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENT_USER: ${{ github.event.comment.user.login }}
+          LABEL_ADDED: ${{ github.event.label.name }}
+          PR_ACTION: ${{ github.event.action }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+          out gate skip; out rereview false; out pr ""; out head ""
+          rereview=false
+
+          case "$EVENT" in
+            workflow_dispatch)
+              pr="$PR_INPUT"; [ "$REREVIEW_INPUT" = "true" ] && rereview=true ;;
+            issue_comment)
+              pr="$ISSUE_NUM"
+              first=${COMMENT_BODY%%$'\n'*}
+              first=$(printf '%s' "$first" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+              case "$first" in
+                /review) ;;
+                /rereview) rereview=true ;;
+                *) echo "Comment is not a review command; skipping."; exit 0 ;;
+              esac
+              case ",$TRUSTED_BOTS," in
+                *",$COMMENT_USER,"*) ;;
+                *)
+                  perm=$(gh api "repos/$REPO/collaborators/$COMMENT_USER/permission" --jq .permission 2>/dev/null || echo none)
+                  case "$perm" in
+                    admin|maintain|write) ;;
+                    *) gh pr comment "$pr" --body "Agent review commands need write access on this repo."; exit 0 ;;
+                  esac ;;
+              esac ;;
+            pull_request)
+              pr="$PR_NUM"
+              case "$LABEL_ADDED" in review:rerequest) rereview=true ;; esac
+              if [ "$PR_ACTION" = labeled ]; then gh pr edit "$pr" --remove-label "$LABEL_ADDED" || true; fi ;;
+          esac
+
+          meta=$(gh pr view "$pr" --json state,isDraft,isCrossRepository,headRefOid)
+          head=$(jq -r .headRefOid <<< "$meta")
+          out pr "$pr"; out head "$head"; out rereview "$rereview"
+
+          if [ "$(jq -r .state <<< "$meta")" != OPEN ]; then echo "PR is not open; skipping."; exit 0; fi
+          if [ "$(jq -r .isCrossRepository <<< "$meta")" = true ]; then
+            echo "::notice::Fork PR; the agent reviewer does not run (no secrets on untrusted heads)."; exit 0
+          fi
+          # Drafts are reviewed only when someone asks for it explicitly.
+          if [ "$(jq -r .isDraft <<< "$meta")" = true ] && [ "$EVENT" = pull_request ] && [ "$PR_ACTION" != labeled ]; then
+            echo "Draft PR; skipping until it is ready for review."; exit 0
+          fi
+
+          if [ "$ENABLED" != true ] || [ "$HAS_TOKEN" != true ]; then
+            echo "::notice::Agent review is off (ENABLE_AGENTS / CLAUDE_CODE_OAUTH_TOKEN); the gate passes without it."
+            if [ "$EVENT" != pull_request ] || [ "$PR_ACTION" = labeled ]; then
+              gh pr comment "$pr" --body "Agent review is off. Set the repo variable \`ENABLE_AGENTS\` to \`true\` and add the \`CLAUDE_CODE_OAUTH_TOKEN\` secret (see \`docs/github-setup.md\`)."
+            fi
+            out gate off; exit 0
+          fi
+
+          gh api "repos/$REPO/statuses/$head" -f state=pending -f context="$STATUS_CONTEXT" \
+            -f description="Claude is reviewing" \
+            -f target_url="$GITHUB_SERVER_URL/$REPO/actions/runs/$GITHUB_RUN_ID" >/dev/null
+          out gate run
+
+  review:
+    needs: prepare
+    if: needs.prepare.outputs.gate == 'run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      # Trusted copy: the rubric, AGENTS.md and agent settings come from the default branch.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      # The PR's code, as plain files for context. Never run or installed.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.prepare.outputs.head }}
+          path: pr
+          persist-credentials: false
+      - uses: ./.github/actions/review-context
+        with:
+          pr: ${{ needs.prepare.outputs.pr }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          rereview: ${{ needs.prepare.outputs.rereview }}
+      - name: Load the rubric
+        id: rubric
+        env:
+          REREVIEW: ${{ needs.prepare.outputs.rereview }}
+        run: |
+          d="RUBRIC_$(openssl rand -hex 8)"
+          {
+            echo "text<<$d"
+            if [ "$REREVIEW" = "true" ]; then cat .github/review-rerequest-prompt.md; fi
+            cat .github/review-prompt.md
+            echo "$d"
+          } >> "$GITHUB_OUTPUT"
+      - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }} # read-only for this job
+          allowed_bots: ${{ env.TRUSTED_BOTS }}
+          claude_args: >-
+            --max-turns 30
+            --allowedTools "Read,Glob,Grep,Write"
+            --disallowedTools "Bash,WebFetch,WebSearch"
+          prompt: ${{ steps.rubric.outputs.text }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: agent-review
+          path: |
+            review.md
+            verdict.txt
+          if-no-files-found: warn
+          retention-days: 7
+
+  # Required check (job) and the writer of the review, label and `agent-review` status.
+  review-gate:
+    needs: [prepare, review]
+    if: always() && needs.prepare.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+      issues: write
+      statuses: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      PR: ${{ needs.prepare.outputs.pr }}
+      HEAD: ${{ needs.prepare.outputs.head }}
+      GATE: ${{ needs.prepare.outputs.gate }}
+      PREPARE: ${{ needs.prepare.result }}
+      REVIEW: ${{ needs.review.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: needs.prepare.outputs.gate == 'run'
+        continue-on-error: true
+        with:
+          name: agent-review
+          path: ${{ runner.temp }}/review
+
+      - name: Post the review and decide
+        run: |
+          set -euo pipefail
+          status() { gh api "repos/$GH_REPO/statuses/$HEAD" -f state="$1" -f context="$STATUS_CONTEXT" \
+                       -f description="$2" -f target_url="$RUN_URL" >/dev/null; }
+          echo "prepare=$PREPARE review=$REVIEW gate=$GATE"
+
+          if [ "$PREPARE" != success ]; then echo "::error::prepare failed ($PREPARE)."; exit 1; fi
+          case "$GATE" in
+            skip) echo "::notice::No agent review for this event."; exit 0 ;;
+            off)  status success "Agent review is switched off"; exit 0 ;;
+          esac
+
+          dir="$RUNNER_TEMP/review"
+          verdict=$(tr -d '[:space:]' < "$dir/verdict.txt" 2>/dev/null || echo MISSING)
+          if [ "$REVIEW" != success ] || [ ! -s "$dir/review.md" ]; then
+            status error "The reviewer did not finish"
+            gh pr comment "$PR" --body "Agent review did not finish ($REVIEW). Comment \`/review\` to retry. [Run log]($RUN_URL)"
+            echo "::error::The reviewer did not finish ($REVIEW)."; exit 1
+          fi
+
+          body="$RUNNER_TEMP/body.md"
+          head -c 60000 "$dir/review.md" > "$body"
+          printf '\n\n---\n<sub>Automated review by Claude on %s · verdict `%s` · [run log](%s) · comment `/rereview` after fixing</sub>\n' \
+            "${HEAD:0:7}" "$verdict" "$RUN_URL" >> "$body"
+
+          # A review of the commit it read. If the PR moved on, a newer run is already reviewing it.
+          if [ "$verdict" = PASS ]; then
+            if ! gh pr review "$PR" --approve --body-file "$body"; then
+              echo "::warning::Could not approve; turn on 'Allow GitHub Actions to create and approve pull requests' (docs/github-setup.md). Posting as a comment."
+              gh pr review "$PR" --comment --body-file "$body"
+            fi
+            gh pr edit "$PR" --add-label review:pass --remove-label review:changes || true
+            status success "Claude approved"
+          else
+            if ! gh pr review "$PR" --request-changes --body-file "$body"; then
+              echo "::warning::Could not request changes; posting as a comment."
+              gh pr review "$PR" --comment --body-file "$body"
+            fi
+            gh pr edit "$PR" --add-label review:changes --remove-label review:pass || true
+            status failure "Claude requested changes"
+            echo "::error::Claude requested changes (verdict $verdict)."; exit 1
+          fi
