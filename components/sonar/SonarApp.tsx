@@ -124,11 +124,11 @@ export function SonarApp() {
 
       <Card>
         <CardContent className='flex flex-col gap-4'>
+          <VelocityTrace on={on} />
           <div className='grid gap-4 md:grid-cols-2'>
             <SpectrumCanvas tone='L' fallbackHz={sonar.settings.toneLHz} on={on} />
             <SpectrumCanvas tone='R' fallbackHz={sonar.settings.toneRHz} on={on} />
           </div>
-          <VelocityTrace on={on} />
           <Text variant='muted' size='xs'>
             Shaded: scanned bandwidth. Dashed red: the bandwidth threshold. Faint line:
             the stillness baseline. A left-to-right wave moves tone L first, then tone R.
