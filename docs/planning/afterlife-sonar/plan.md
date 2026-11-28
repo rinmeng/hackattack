@@ -44,7 +44,7 @@ None. Settings live in the browser's localStorage only.
 All commits go on `feature/afterlife-sonar` and ship as one PR, since the page is self-contained in new files. Each step is a commit that passes `pnpm check` on its own.
 
 1. [ ] Hardware check: show the spectrum view on every teammate's laptop and pick the demo laptop (hour 0 to 1)
-2. [ ] Stereo test: does a left-to-right wave reliably hit tone L before tone R? Choose Mode A or Mode B as the default (hour 1 to 3)
+2. [x] Stereo test: does a left-to-right wave reliably hit tone L before tone R? Choose Mode A or Mode B as the default (hour 1 to 3)
 3. [x] `feat(sonar): add audio engine and calibration` (types, constants, dsp, audio engine, calibrator)
 4. [x] `feat(sonar): add gesture detector` (gating, state machine, events)
 5. [x] `feat(sonar): add sonar page ui` (hook, components, page, Navbar link)
@@ -60,12 +60,15 @@ All commits go on `feature/afterlife-sonar` and ship as one PR, since the page i
 - 2026-11-27: The sweep glides the oscillators (phase-continuous, click-free) instead of a 50 ms gain dip per step, since a dip wouldn't fit an 80 ms step. It also runs the analyser at fftSize 2048, so each 80 ms step clears the previous candidate (a 4096 window is 85 ms).
 - 2026-11-27: The continuous-motion block tolerates 200 ms gaps in a tone's motion, because Doppler crosses zero each time a waving hand reverses.
 - 2026-11-27: Form labels use the shadcn `Label`, because `Text` doesn't accept `htmlFor`.
+- 2026-11-28: Mode B (push/pull) is the default. In testing on the demo MacBook, tone L crossed its threshold first on almost every wave whichever way the hand moved (16 RIGHT, 2 LEFT, 9 ambiguous), so Mode A's onset order measured tone sensitivity, not hand position. Push/pull gave clean triggers (shifts of +4 to +15 bins for pushes, -3 to -14 for pulls).
+- 2026-11-28: After a trigger, the opposite direction is locked out for 1200 ms (`returnLockoutMs`) so the hand's return stroke doesn't fire. Cooldown is 900 ms and the continuous-motion limit 4000 ms, both raised after testing.
+- 2026-11-28: Tried and reverted a "reversal gap" rule for push/pull. One- or two-frame sign flickers inside a single gesture tripped it, so it threw away most real gestures.
 - 2026-11-27: Only new files, plus one line each in `components/Navbar.tsx` and `lib/types/index.ts`, so the work never conflicts with other teams' branches.
 
 ## Open questions
 
-- Does stereo onset order reliably tell left from right on the demo MacBook? If not, Mode B (push = right, pull = left) becomes the default.
-- How does the MacBook mic respond above 20 kHz? Apple doesn't publish it. Check with the spectrum view before writing gesture code.
+- Can Mode A be rescued for real left/right swipes? Ideas not yet built: measure each tone against its own stillness noise instead of its peak (tone R's loud direct signal raises its bar), time each tone's peak disturbance instead of its first threshold crossing, and stop auto-pick choosing tones above about 20.5 kHz (it always picks 21 kHz, where the echo is weakest).
+- In push/pull mode, a fast approach to get into position reads as a push and fires RIGHT. The workaround is technique: bring the hand in slowly, hold still, then push or pull.
 - Should there be a GitHub issue for this work, to link from the PR?
 
 ## Done when
