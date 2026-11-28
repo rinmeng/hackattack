@@ -40,9 +40,6 @@ export interface SonarSettings {
   cooldownMs: number;
   /** After a trigger, the opposite direction stays blocked this long (return stroke). */
   returnLockoutMs: number;
-  /** Mode B: a push or pull is ignored if the opposite motion ended less than this
-   * long before it started (the approach before a pull, or the return after a push). */
-  reversalGapMs: number;
   continuousMotionLimitMs: number;
   mode: SonarMode;
   invertDirection: boolean;
