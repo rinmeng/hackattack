@@ -177,6 +177,11 @@ export class GestureDetector extends SonarEmitter {
   private blocked = false;
   private pushRun = 0;
   private pullRun = 0;
+  /** Mode B: when the current push/pull run started, and the last push/pull frame. */
+  private pushStart = 0;
+  private pullStart = 0;
+  private lastPush = -Infinity;
+  private lastPull = -Infinity;
   private logId = 0;
 
   updateSettings(settings: SonarSettings): void {
@@ -251,6 +256,8 @@ export class GestureDetector extends SonarEmitter {
     this.blocked = false;
     this.pushRun = 0;
     this.pullRun = 0;
+    this.lastPush = -Infinity;
+    this.lastPull = -Infinity;
     this.lastAnyMoving = now;
     this.lastNoise = -Infinity;
   }
@@ -431,13 +438,33 @@ export class GestureDetector extends SonarEmitter {
     if (settings.mode === 'pushpull') {
       const shift = (L.shiftBins + R.shiftBins) / 2;
       const near = Math.max(L.zE, R.zE) >= settings.minProximityZ;
-      this.pushRun = near && shift >= settings.minShiftBins ? this.pushRun + 1 : 0;
-      this.pullRun = near && shift <= -settings.minShiftBins ? this.pullRun + 1 : 0;
+      const pushing = near && shift >= settings.minShiftBins;
+      const pulling = near && shift <= -settings.minShiftBins;
+      if (pushing && this.pushRun === 0) this.pushStart = now;
+      if (pulling && this.pullRun === 0) this.pullStart = now;
+      this.pushRun = pushing ? this.pushRun + 1 : 0;
+      this.pullRun = pulling ? this.pullRun + 1 : 0;
+
+      // A gesture only counts if the opposite motion didn't come right before it:
+      // a pull straight after a push is the hand returning (or a push straight after
+      // a pull is the hand approaching to start the gesture).
       if (this.pushRun === PUSH_PULL_FRAMES) {
-        this.fire('right', now, `push (avg shift ${shift.toFixed(1)} bins)`);
+        const gap = this.pushStart - this.lastPull;
+        if (gap < settings.reversalGapMs) {
+          this.log('suppressed', `push ignored: came ${gap.toFixed(0)} ms after a pull`);
+        } else {
+          this.fire('right', now, `push (avg shift ${shift.toFixed(1)} bins)`);
+        }
       } else if (this.pullRun === PUSH_PULL_FRAMES) {
-        this.fire('left', now, `pull (avg shift ${shift.toFixed(1)} bins)`);
+        const gap = this.pullStart - this.lastPush;
+        if (gap < settings.reversalGapMs) {
+          this.log('suppressed', `pull ignored: came ${gap.toFixed(0)} ms after a push`);
+        } else {
+          this.fire('left', now, `pull (avg shift ${shift.toFixed(1)} bins)`);
+        }
       }
+      if (pushing) this.lastPush = now;
+      if (pulling) this.lastPull = now;
     }
 
     // Drift: after a long quiet spell, slowly track the baseline.

@@ -193,6 +193,9 @@ export const DEFAULT_SETTINGS: SonarSettings = {
   // A hand resetting after a gesture moves the opposite way within about a second;
   // 1200 ms covers that, measured on a MacBook in push/pull mode.
   returnLockoutMs: 1200,
+  // Turning a hand around takes about 100–300 ms; a deliberate gesture usually starts
+  // after a pause longer than that, so 400 ms separates the two.
+  reversalGapMs: 400,
   // 4000 ms: 2500 tripped during normal back-to-back gestures on a MacBook.
   continuousMotionLimitMs: 4000,
   // Push/pull is the default: on a MacBook the mic sits too close to the middle for
@@ -301,6 +304,15 @@ export const SETTING_SLIDERS: readonly SonarSliderDef[] = [
     label: 'Cooldown',
     min: 0,
     max: 3000,
+    step: 50,
+    unit: 'ms',
+    displayScale: 1,
+  },
+  {
+    key: 'reversalGapMs',
+    label: 'Reversal gap (push/pull)',
+    min: 0,
+    max: 1500,
     step: 50,
     unit: 'ms',
     displayScale: 1,
