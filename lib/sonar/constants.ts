@@ -187,9 +187,17 @@ export const DEFAULT_SETTINGS: SonarSettings = {
   // in roughly 100–300 ms, so 30 ms separates real order from jitter.
   onsetGapMs: 30,
   pairWindowMs: 600,
-  cooldownMs: 700,
-  continuousMotionLimitMs: 2500,
-  mode: 'stereo',
+  // 900 ms: SoundWave used 700 ms; tuning on a MacBook showed slow return strokes
+  // getting through at 700.
+  cooldownMs: 900,
+  // A hand resetting after a gesture moves the opposite way within about a second;
+  // 1200 ms covers that, measured on a MacBook in push/pull mode.
+  returnLockoutMs: 1200,
+  // 4000 ms: 2500 tripped during normal back-to-back gestures on a MacBook.
+  continuousMotionLimitMs: 4000,
+  // Push/pull is the default: on a MacBook the mic sits too close to the middle for
+  // the stereo onset order to separate left from right reliably.
+  mode: 'pushpull',
   invertDirection: false,
 };
 
@@ -291,6 +299,15 @@ export const SETTING_SLIDERS: readonly SonarSliderDef[] = [
   {
     key: 'cooldownMs',
     label: 'Cooldown',
+    min: 0,
+    max: 3000,
+    step: 50,
+    unit: 'ms',
+    displayScale: 1,
+  },
+  {
+    key: 'returnLockoutMs',
+    label: 'Return-stroke lockout',
     min: 0,
     max: 3000,
     step: 50,

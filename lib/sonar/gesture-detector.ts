@@ -170,6 +170,7 @@ export class GestureDetector extends SonarEmitter {
   };
 
   private lastTrigger = -Infinity;
+  private lastDirection: GestureDirection | null = null;
   private lastAnyMoving = -Infinity;
   private lastNoise = -Infinity;
   private ignoreUntil = -Infinity;
@@ -496,7 +497,20 @@ export class GestureDetector extends SonarEmitter {
       this.log('suppressed', `${direction.toUpperCase()} suppressed: cooldown`);
       return;
     }
+    // The hand resetting after a gesture moves the opposite way: ignore it.
+    if (
+      this.lastDirection !== null &&
+      direction !== this.lastDirection &&
+      now - this.lastTrigger < settings.returnLockoutMs
+    ) {
+      this.log(
+        'suppressed',
+        `${direction.toUpperCase()} suppressed: return stroke after ${this.lastDirection.toUpperCase()}`
+      );
+      return;
+    }
     this.lastTrigger = now;
+    this.lastDirection = direction;
     this.log('trigger', `${direction.toUpperCase()} (${detail})`);
     this.emit(direction, { direction, source: 'sonar', time: now, detail });
   }

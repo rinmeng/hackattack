@@ -38,6 +38,8 @@ export interface SonarSettings {
   onsetGapMs: number;
   pairWindowMs: number;
   cooldownMs: number;
+  /** After a trigger, the opposite direction stays blocked this long (return stroke). */
+  returnLockoutMs: number;
   continuousMotionLimitMs: number;
   mode: SonarMode;
   invertDirection: boolean;
