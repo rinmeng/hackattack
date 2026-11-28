@@ -98,6 +98,9 @@ const HELPER_BIN_NAME = 'afterlife-wifi-sense-rssi';
 const MOCK_BASE_RSSI = -55;
 // macOS seems to refresh RSSI roughly every 100-300 ms; the mock holds each value this long.
 const MOCK_REFRESH_MS = 150;
+// In the pinned inside/outside scenes the intensity changes this often, like a person
+// walking nearer and further.
+const MOCK_SCENE_REDRAW_MS = 2_000;
 // Quiet-room jitter (std dev before rounding). Rounding to whole dBm makes it look real.
 const MOCK_QUIET_SIGMA = 0.4;
 const MOCK_INSIDE_SIGMA_MIN = 2;
@@ -310,6 +313,7 @@ function createMockSource(intervalMs) {
   let scene = 'auto';
   let baseline = MOCK_BASE_RSSI;
   let sigma = MOCK_QUIET_SIGMA;
+  let sceneDrawnAt = 0;
   let burstEndsAt = 0;
   let nextBurstAt = Date.now() + uniform(MOCK_GAP_MIN_MS, MOCK_GAP_MAX_MS);
   let dropUntil = 0;
@@ -319,7 +323,20 @@ function createMockSource(intervalMs) {
   let status = () => {};
 
   /** @param {number} now */
+  function drawSceneSigma(now) {
+    sceneDrawnAt = now;
+    sigma =
+      scene === 'inside'
+        ? uniform(MOCK_INSIDE_SIGMA_MIN, MOCK_INSIDE_SIGMA_MAX)
+        : uniform(MOCK_OUTSIDE_SIGMA_MIN, MOCK_OUTSIDE_SIGMA_MAX);
+  }
+
+  /** @param {number} now */
   function updateSchedule(now) {
+    if (scene === 'inside' || scene === 'outside') {
+      if (now - sceneDrawnAt >= MOCK_SCENE_REDRAW_MS) drawSceneSigma(now);
+      return;
+    }
     if (scene !== 'auto') return;
     if (burstEndsAt && now >= burstEndsAt) {
       burstEndsAt = 0;
@@ -372,11 +389,10 @@ function createMockSource(intervalMs) {
         burstEndsAt = 0;
         nextBurstAt = now + uniform(MOCK_GAP_MIN_MS, MOCK_GAP_MAX_MS);
       } else if (name === 'quiet') sigma = MOCK_QUIET_SIGMA;
-      else if (name === 'inside')
-        sigma = uniform(MOCK_INSIDE_SIGMA_MIN, MOCK_INSIDE_SIGMA_MAX);
-      else if (name === 'outside')
-        sigma = uniform(MOCK_OUTSIDE_SIGMA_MIN, MOCK_OUTSIDE_SIGMA_MAX);
-      else if (name === 'shift') {
+      else if (name === 'inside' || name === 'outside') {
+        scene = name;
+        drawSceneSigma(now);
+      } else if (name === 'shift') {
         // A one-off event on top of the current scene, not a scene of its own.
         baseline =
           baseline === MOCK_BASE_RSSI ? MOCK_BASE_RSSI - MOCK_SHIFT_DB : MOCK_BASE_RSSI;

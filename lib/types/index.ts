@@ -8,3 +8,4 @@ export type {
   TablesInsert,
   TablesUpdate,
 } from './database';
+export * from './wifi-sense';
