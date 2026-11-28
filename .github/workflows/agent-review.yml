@@ -10,7 +10,16 @@
 # Make the `agent-review` commit status a required check (it lands on the PR's head commit even
 # when a /review comment started the run). Setup: docs/github-setup.md.
 #
-# Manual controls (need ENABLE_AGENTS=true and the CLAUDE_CODE_OAUTH_TOKEN secret):
+# Whose Claude token pays: each teammate keeps their own secret CLAUDE_TOKEN_<USERNAME> (uppercase,
+# `-` becomes `_`). There is no shared token and no fallback to someone else's.
+#   • Whoever asks pays: the `/review` commenter, the person who adds `review:request`, or the
+#     person who starts workflow_dispatch.
+#   • Automatic runs (opened, pushed, ready for review): the PR author, or for an agent PR from
+#     `claude/`, the teammate in its `agent-ready:<username>` label.
+#   • If that person has no secret, nothing runs and `agent-review` stays pending until someone
+#     with a token comments `/review`.
+#
+# Manual controls (need ENABLE_AGENTS=true):
 #   • Labels `review:request` / `review:rerequest` (removed when the run starts)
 #   • PR comment whose first line is `/review` or `/rereview`, from someone with write access
 #   • workflow_dispatch with pr_number (optional rereview: true)
@@ -71,6 +80,9 @@ jobs:
       head: ${{ steps.meta.outputs.head }}
       rereview: ${{ steps.meta.outputs.rereview }}
       gate: ${{ steps.meta.outputs.gate }}
+      payer: ${{ steps.meta.outputs.payer }}
+      secret: ${{ steps.meta.outputs.secret }}
+      asked: ${{ steps.meta.outputs.asked }}
     steps:
       - name: Decide whether to run and which PR
         id: meta
@@ -81,7 +93,8 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           EVENT: ${{ github.event_name }}
           ENABLED: ${{ vars.ENABLE_AGENTS }}
-          HAS_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          ACTOR: ${{ github.actor }}
+          SENDER: ${{ github.event.sender.login }}
           PR_INPUT: ${{ inputs.pr_number }}
           REREVIEW_INPUT: ${{ inputs.rereview }}
           COMMENT_BODY: ${{ github.event.comment.body }}
@@ -93,12 +106,18 @@ jobs:
         run: |
           set -euo pipefail
           out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
-          out gate skip; out rereview false; out pr ""; out head ""
+          out gate skip; out rereview false; out pr ""; out head ""; out payer ""; out secret ""; out asked false
           rereview=false
+          payer=""   # who asked; empty means an automatic run, paid by the PR's owner
+          can_write() {
+            case "$(gh api "repos/$REPO/collaborators/$1/permission" --jq .permission 2>/dev/null || echo none)" in
+              admin|maintain|write) return 0 ;; *) return 1 ;;
+            esac
+          }
 
           case "$EVENT" in
             workflow_dispatch)
-              pr="$PR_INPUT"; [ "$REREVIEW_INPUT" = "true" ] && rereview=true ;;
+              pr="$PR_INPUT"; payer="$ACTOR"; [ "$REREVIEW_INPUT" = "true" ] && rereview=true ;;
             issue_comment)
               pr="$ISSUE_NUM"
               first=${COMMENT_BODY%%$'\n'*}
@@ -109,21 +128,23 @@ jobs:
                 *) echo "Comment is not a review command; skipping."; exit 0 ;;
               esac
               case ",$TRUSTED_BOTS," in
-                *",$COMMENT_USER,"*) ;;
+                *",$COMMENT_USER,"*) ;;   # a bot's request is paid like an automatic run
                 *)
-                  perm=$(gh api "repos/$REPO/collaborators/$COMMENT_USER/permission" --jq .permission 2>/dev/null || echo none)
-                  case "$perm" in
-                    admin|maintain|write) ;;
-                    *) gh pr comment "$pr" --body "Agent review commands need write access on this repo."; exit 0 ;;
-                  esac ;;
+                  can_write "$COMMENT_USER" || { gh pr comment "$pr" --body "Agent review commands need write access on this repo."; exit 0; }
+                  payer="$COMMENT_USER" ;;
               esac ;;
             pull_request)
               pr="$PR_NUM"
               case "$LABEL_ADDED" in review:rerequest) rereview=true ;; esac
-              if [ "$PR_ACTION" = labeled ]; then gh pr edit "$pr" --remove-label "$LABEL_ADDED" || true; fi ;;
+              if [ "$PR_ACTION" = labeled ]; then
+                gh pr edit "$pr" --remove-label "$LABEL_ADDED" || true
+                # Labelling needs only triage access; spending a token needs write access.
+                can_write "$SENDER" || { gh pr comment "$pr" --body "Requesting an agent review needs write access on this repo."; exit 0; }
+                payer="$SENDER"
+              fi ;;
           esac
 
-          meta=$(gh pr view "$pr" --json state,isDraft,isCrossRepository,headRefOid)
+          meta=$(gh pr view "$pr" --json state,isDraft,isCrossRepository,headRefOid,headRefName,author,labels)
           head=$(jq -r .headRefOid <<< "$meta")
           out pr "$pr"; out head "$head"; out rereview "$rereview"
 
@@ -136,16 +157,37 @@ jobs:
             echo "Draft PR; skipping until it is ready for review."; exit 0
           fi
 
-          if [ "$ENABLED" != true ] || [ "$HAS_TOKEN" != true ]; then
-            echo "::notice::Agent review is off (ENABLE_AGENTS / CLAUDE_CODE_OAUTH_TOKEN); the gate passes without it."
-            if [ "$EVENT" != pull_request ] || [ "$PR_ACTION" = labeled ]; then
-              gh pr comment "$pr" --body "Agent review is off. Set the repo variable \`ENABLE_AGENTS\` to \`true\` and add the \`CLAUDE_CODE_OAUTH_TOKEN\` secret (see \`docs/github-setup.md\`)."
+          asked=false; [ -n "$payer" ] && asked=true
+          out asked "$asked"
+
+          if [ "$ENABLED" != true ]; then
+            echo "::notice::Agent review is off (ENABLE_AGENTS); the gate passes without it."
+            if $asked; then
+              gh pr comment "$pr" --body "Agent review is off. Set the repo variable \`ENABLE_AGENTS\` to \`true\` (see \`docs/github-setup.md\`)."
             fi
             out gate off; exit 0
           fi
 
+          if [ -z "$payer" ]; then
+            # Automatic run: an agent PR is paid by its owner, any other PR by its author.
+            if [[ "$(jq -r .headRefName <<< "$meta")" == claude/* ]]; then
+              payer=$(jq -r '[.labels[].name | select(startswith("agent-ready:")) | sub("^agent-ready:"; "")] | first // ""' <<< "$meta")
+            else
+              payer=$(jq -r '.author.login // ""' <<< "$meta")
+            fi
+          fi
+          if [ -z "$payer" ] || ! can_write "$payer"; then
+            echo "::notice::No teammate to pay for this review ('$payer'); waiting for a /review."
+            gh api "repos/$REPO/statuses/$head" -f state=pending -f context="$STATUS_CONTEXT" \
+              -f description="No one to pay for the review; comment /review to use your token" >/dev/null
+            exit 0
+          fi
+          secret="CLAUDE_TOKEN_$(tr '[:lower:]-' '[:upper:]_' <<< "$payer")"
+          echo "Review paid by @$payer ($secret)"
+          out payer "$payer"; out secret "$secret"
+
           gh api "repos/$REPO/statuses/$head" -f state=pending -f context="$STATUS_CONTEXT" \
-            -f description="Claude is reviewing" \
+            -f description="Claude is reviewing (paid by @$payer)" \
             -f target_url="$GITHUB_SERVER_URL/$REPO/actions/runs/$GITHUB_RUN_ID" >/dev/null
           out gate run
 
@@ -158,25 +200,39 @@ jobs:
       contents: read
       pull-requests: read
       issues: read
+    outputs:
+      token: ${{ steps.token.outputs.ok }}
     steps:
+      - name: Payer has a Claude token
+        id: token
+        env:
+          SECRET: ${{ needs.prepare.outputs.secret }}
+          CLAUDE_TOKEN: ${{ secrets[needs.prepare.outputs.secret] }}
+        run: |
+          if [ -n "$CLAUDE_TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "ok=false" >> "$GITHUB_OUTPUT"; echo "::notice::Secret $SECRET is not set; not reviewing."; fi
       # Trusted copy: the rubric, AGENTS.md and agent settings come from the default branch.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token.outputs.ok == 'true'
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       # The PR's code, as plain files for context. Never run or installed.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.token.outputs.ok == 'true'
         with:
           ref: ${{ needs.prepare.outputs.head }}
           path: pr
           persist-credentials: false
       - uses: ./.github/actions/review-context
+        if: steps.token.outputs.ok == 'true'
         with:
           pr: ${{ needs.prepare.outputs.pr }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           rereview: ${{ needs.prepare.outputs.rereview }}
       - name: Load the rubric
         id: rubric
+        if: steps.token.outputs.ok == 'true'
         env:
           REREVIEW: ${{ needs.prepare.outputs.rereview }}
         run: |
@@ -188,8 +244,9 @@ jobs:
             echo "$d"
           } >> "$GITHUB_OUTPUT"
       - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
+        if: steps.token.outputs.ok == 'true'
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ secrets[needs.prepare.outputs.secret] }} # the payer's own token
           github_token: ${{ secrets.GITHUB_TOKEN }} # read-only for this job
           allowed_bots: ${{ env.TRUSTED_BOTS }}
           claude_args: >-
@@ -198,7 +255,7 @@ jobs:
             --disallowedTools "Bash,WebFetch,WebSearch"
           prompt: ${{ steps.rubric.outputs.text }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
+        if: always() && steps.token.outputs.ok == 'true'
         with:
           name: agent-review
           path: |
@@ -225,6 +282,11 @@ jobs:
       GATE: ${{ needs.prepare.outputs.gate }}
       PREPARE: ${{ needs.prepare.result }}
       REVIEW: ${{ needs.review.result }}
+      TOKEN: ${{ needs.review.outputs.token }}
+      PAYER: ${{ needs.prepare.outputs.payer }}
+      SECRET: ${{ needs.prepare.outputs.secret }}
+      ASKED: ${{ needs.prepare.outputs.asked }}
+      ACTION: ${{ github.event.action }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
@@ -247,6 +309,15 @@ jobs:
             off)  status success "Agent review is switched off"; exit 0 ;;
           esac
 
+          if [ "$REVIEW" = success ] && [ "$TOKEN" != true ]; then
+            # No fallback to someone else's token. The check stays pending until someone pays.
+            status pending "@$PAYER has no $SECRET secret; comment /review to use your own"
+            if [ "$ASKED" = true ] || [ "$ACTION" = opened ] || [ "$ACTION" = ready_for_review ]; then
+              gh pr comment "$PR" --body "@$PAYER hasn't added a Claude token, so the agent review didn't run. Add the repo secret \`$SECRET\` (see \`docs/github-setup.md\`), or anyone with a token can comment \`/review\` to pay for it."
+            fi
+            exit 0
+          fi
+
           dir="$RUNNER_TEMP/review"
           verdict=$(tr -d '[:space:]' < "$dir/verdict.txt" 2>/dev/null || echo MISSING)
           if [ "$REVIEW" != success ] || [ ! -s "$dir/review.md" ]; then
@@ -257,8 +328,8 @@ jobs:
 
           body="$RUNNER_TEMP/body.md"
           head -c 60000 "$dir/review.md" > "$body"
-          printf '\n\n---\n<sub>Automated review by Claude on %s · verdict `%s` · [run log](%s) · comment `/rereview` after fixing</sub>\n' \
-            "${HEAD:0:7}" "$verdict" "$RUN_URL" >> "$body"
+          printf '\n\n---\n<sub>Automated review by Claude on %s · verdict `%s` · paid by @%s · [run log](%s) · comment `/rereview` after fixing</sub>\n' \
+            "${HEAD:0:7}" "$verdict" "$PAYER" "$RUN_URL" >> "$body"
 
           # A review of the commit it read. If the PR moved on, a newer run is already reviewing it.
           if [ "$verdict" = PASS ]; then

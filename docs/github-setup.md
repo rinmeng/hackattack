@@ -16,12 +16,29 @@ One-time settings for CI, the agent reviewer and the coding agent. A repo admin 
 
 Settings → Secrets and variables → Actions.
 
-| Name                      | Kind     | What it is                                                                                                        |
-| ------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN` | secret   | From `claude setup-token`. Runs count against that subscription's usage limits.                                   |
-| `GH_PAT`                  | secret   | Fine-grained token for this repo only: Contents, Pull requests, Issues = read and write. Lets agent PRs start CI. |
-| `ENABLE_AGENTS`           | variable | `true` turns both agents on. Anything else: they stay off and the review gate passes without them.                |
-| `ENABLE_NIGHTLY`          | variable | `true` lets `agent-build` pick one ready issue each night (10:17 UTC).                                            |
+| Name                      | Kind     | What it is                                                                                                                                                                   |
+| ------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE_TOKEN_<USERNAME>` | secret   | One per teammate, e.g. `CLAUDE_TOKEN_RINMENG`, `CLAUDE_TOKEN_BRENDENJONES1`: uppercase username, `-` becomes `_`. From `claude setup-token`. Only that person's runs use it. |
+| `GH_PAT`                  | secret   | Fine-grained token for this repo only: Contents, Pull requests, Issues = read and write. Lets agent PRs start CI.                                                            |
+| `ENABLE_AGENTS`           | variable | `true` turns both agents on. Anything else: they stay off and the review gate passes without them.                                                                           |
+| `ENABLE_NIGHTLY`          | variable | `true` lets `agent-build` pick one ready issue each night (10:17 UTC).                                                                                                       |
+
+### Whose token pays
+
+There is no shared Claude token. Each run uses one teammate's `CLAUDE_TOKEN_<USERNAME>` and never
+falls back to someone else's.
+
+| Run                                  | Paid by                                                                                         |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `/review`, `/rereview`               | the commenter                                                                                   |
+| `review:request`, `review:rerequest` | whoever added the label                                                                         |
+| Manual run (workflow_dispatch)       | whoever started it                                                                              |
+| Automatic review (opened, pushed)    | the PR author; for an agent PR, the teammate in its `agent-ready:` label                        |
+| Agent build                          | the issue's `agent-ready:<username>` owner, who must add that label themselves or start the run |
+
+If that person has no secret, the run is skipped with a comment, and `agent-review` stays pending
+until someone with a token comments `/review`. Anyone who can edit workflows can technically reach
+every secret, so `.github/` is covered by CODEOWNERS.
 
 ## Settings
 

@@ -13,9 +13,15 @@
 # To retry a queued issue, remove agent-queue and add it again.
 #
 # Starts: the agent-queue label; workflow_dispatch (an issue number, or blank for the next
-# agent-queue issue); and nightly (agent-night issues) when ENABLE_NIGHTLY=true. All need ENABLE_AGENTS=true and the secrets
-# CLAUDE_CODE_OAUTH_TOKEN and GH_PAT (see docs/github-setup.md). GH_PAT matters: pushes and PRs
-# made with the default GITHUB_TOKEN do not start CI or the reviewer.
+# agent-queue issue); and nightly (agent-night issues) when ENABLE_NIGHTLY=true. All need
+# ENABLE_AGENTS=true, the GH_PAT secret and the owner's CLAUDE_TOKEN_<USERNAME> (see
+# docs/github-setup.md). GH_PAT matters: pushes and PRs made with the default GITHUB_TOKEN do not
+# start CI or the reviewer.
+#
+# Whose Claude token pays: the owner's own secret CLAUDE_TOKEN_<USERNAME> (uppercase, `-` becomes
+# `_`). No shared token, no fallback. Because it spends the owner's token, the owner must agree: they
+# added the agent-ready:<username> label themselves, or they started this run. Without the secret
+# the build doesn't run and the issue gets a comment.
 #
 # Security: the repo is public, so only issues opened by someone with write access are built, the
 # label must be added by someone with write access, and the named owner must have write access.
@@ -57,6 +63,7 @@ jobs:
     outputs:
       number: ${{ steps.pick.outputs.number }}
       owner: ${{ steps.pick.outputs.owner }}
+      secret: ${{ steps.pick.outputs.secret }}
     steps:
       - name: Pick the issue and its owner
         id: pick
@@ -65,6 +72,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           EVENT: ${{ github.event_name }}
           SENDER: ${{ github.event.sender.login }}
+          ACTOR: ${{ github.actor }}
           LABELED_ISSUE: ${{ github.event.issue.number }}
           INPUT_ISSUE: ${{ inputs.issue }}
           QUEUE: ${{ github.event_name == 'schedule' && 'agent-night' || 'agent-queue' }}
@@ -113,13 +121,45 @@ jobs:
           if ! can_write "$owner"; then say "\`$owner\` has no write access here, so they can't own an agent PR."; exit 0; fi
           if has_open_pr "$n"; then say "There is already an open PR from \`claude/issue-$n\`."; exit 0; fi
 
-          gh issue edit "$n" --add-assignee "$owner" || true
-          echo "Building #$n for @$owner"
-          { echo "number=$n"; echo "owner=$owner"; } >> "$GITHUB_OUTPUT"
+          # The owner's token pays, so the owner must have opted in.
+          starter=""; [ "$EVENT" = issues ] && starter="$SENDER"; [ "$EVENT" = workflow_dispatch ] && starter="$ACTOR"
+          labeler=$(gh api "repos/$GH_REPO/issues/$n/events" --paginate --jq             ".[] | select(.event == \"labeled\" and .label.name == \"agent-ready:$owner\") | .actor.login" | tail -n1)
+          if [ "$starter" != "$owner" ] && [ "$labeler" != "$owner" ]; then
+            say "This run would spend @$owner's Claude token, so @$owner needs to add the \`agent-ready:$owner\` label themselves (or start the run)."; exit 0
+          fi
 
-  build:
+          gh issue edit "$n" --add-assignee "$owner" || true
+          secret="CLAUDE_TOKEN_$(tr '[:lower:]-' '[:upper:]_' <<< "$owner")"
+          echo "Building #$n for @$owner, paid with $secret"
+          { echo "number=$n"; echo "owner=$owner"; echo "secret=$secret"; } >> "$GITHUB_OUTPUT"
+
+  token:
     needs: pick
     if: needs.pick.outputs.number != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      issues: write
+    outputs:
+      ok: ${{ steps.check.outputs.ok }}
+    steps:
+      - name: Owner has a Claude token
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          N: ${{ needs.pick.outputs.number }}
+          OWNER: ${{ needs.pick.outputs.owner }}
+          SECRET: ${{ needs.pick.outputs.secret }}
+          CLAUDE_TOKEN: ${{ secrets[needs.pick.outputs.secret] }}
+        run: |
+          if [ -n "$CLAUDE_TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          echo "ok=false" >> "$GITHUB_OUTPUT"
+          gh issue comment "$N" --body "@$OWNER hasn't added a Claude token, so the agent didn't build this. Add the repo secret \`$SECRET\` (see \`docs/github-setup.md\`), then remove and re-add \`agent-queue\`."
+
+  build:
+    needs: [pick, token]
+    if: needs.token.outputs.ok == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -141,7 +181,7 @@ jobs:
           git config user.email "hackattack-agent@users.noreply.github.com"
       - uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ secrets[needs.pick.outputs.secret] }} # the owner's own token
           github_token: ${{ secrets.GH_PAT }}
           allowed_bots: ${{ env.TRUSTED_BOTS }}
           claude_args: >-
