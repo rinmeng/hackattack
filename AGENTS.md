@@ -210,7 +210,7 @@ Track work in GitHub issues so everyone, human or agent, can see what's planned,
 
 Every ready PR gets an independent review from Claude (`.github/workflows/agent-review.yml`, rubric in `.github/review-prompt.md`). It **approves** the PR or **requests changes**, and sets `review:pass` or `review:changes`. After fixing what it found, comment `/rereview`. Write code it can verify: meet each "Done when" item literally and follow the rules in this file.
 
-Issues the coding agent may build carry an `agent-ready:<username>` label naming the teammate who owns the result. Adding `agent-now` starts a build (`.github/workflows/agent-build.yml`): Claude opens a draft PR from `claude/issue-<N>`, assigned to that teammate, with a review request. Label rules and setup are in [docs/github-setup.md](docs/github-setup.md). Agents never edit `.github/`, never merge, and never mark their own PR ready.
+Issues the coding agent may build carry an `agent-ready:<username>` label naming the teammate who owns the result. Adding `agent-queue` starts a build now, and `agent-night` queues it for the nightly run (`.github/workflows/agent-build.yml`): Claude opens a draft PR from `claude/issue-<N>`, assigned to that teammate, with a review request. Label rules and setup are in [docs/github-setup.md](docs/github-setup.md). Agents never edit `.github/`, never merge, and never mark their own PR ready.
 
 ## Working on a Team
 

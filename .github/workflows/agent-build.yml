@@ -2,13 +2,18 @@
 #
 # Labels (see .github/labels.json):
 #   agent-ready:<username>  The issue is specified well enough for the agent, and <username> owns it:
-#                           they are assigned the PR and asked to review it. Never starts a run on
-#                           its own, so labelling issues in bulk can't start dozens of runs.
-#   agent-now               Build this issue now. Needs exactly one agent-ready:<username> label.
+#                           they are assigned the issue and the PR, and asked to review it. Like
+#                           Medici's owner:* labels, it never starts a run on its own.
+#   agent-queue             Opt in: build it now. Adding the label starts a run; a manual run with
+#                           no issue number takes the lowest queued issue.
+#   agent-night             Opt in: only the nightly run (ENABLE_NIGHTLY=true) picks it up.
 #   needs-human / blocked   The agent skips the issue (and adds needs-human when it gets stuck).
+#   agent                   Set on PRs the agent opened.
+# Queue labels stay on the issue until its PR opens, so an issue with an open PR is never rebuilt.
+# To retry a queued issue, remove agent-queue and add it again.
 #
-# Starts: the agent-now label; workflow_dispatch (an issue number, or blank for the next ready
-# issue); and nightly when ENABLE_NIGHTLY=true. All need ENABLE_AGENTS=true and the secrets
+# Starts: the agent-queue label; workflow_dispatch (an issue number, or blank for the next
+# agent-queue issue); and nightly (agent-night issues) when ENABLE_NIGHTLY=true. All need ENABLE_AGENTS=true and the secrets
 # CLAUDE_CODE_OAUTH_TOKEN and GH_PAT (see docs/github-setup.md). GH_PAT matters: pushes and PRs
 # made with the default GITHUB_TOKEN do not start CI or the reviewer.
 #
@@ -24,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       issue:
-        description: Issue number to build (blank = next agent-ready issue)
+        description: Issue number to build (blank = next agent-queue issue)
         required: false
 
 permissions: {}
@@ -42,7 +47,7 @@ jobs:
     if: >-
       vars.ENABLE_AGENTS == 'true' &&
       (github.event_name != 'schedule' || vars.ENABLE_NIGHTLY == 'true') &&
-      (github.event_name != 'issues' || github.event.label.name == 'agent-now')
+      (github.event_name != 'issues' || github.event.label.name == 'agent-queue')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -62,6 +67,7 @@ jobs:
           SENDER: ${{ github.event.sender.login }}
           LABELED_ISSUE: ${{ github.event.issue.number }}
           INPUT_ISSUE: ${{ inputs.issue }}
+          QUEUE: ${{ github.event_name == 'schedule' && 'agent-night' || 'agent-queue' }}
         run: |
           set -euo pipefail
           echo "number=" >> "$GITHUB_OUTPUT"
@@ -75,20 +81,20 @@ jobs:
 
           n="${LABELED_ISSUE:-$INPUT_ISSUE}"
           if [ "$EVENT" = issues ]; then
-            gh issue edit "$n" --remove-label agent-now || true
             if ! can_write "$SENDER"; then say "Only people with write access can start the agent."; exit 0; fi
           fi
 
           if [ -z "$n" ]; then
-            # Next ready issue: lowest number, not needs-human or blocked, no open PR yet.
-            for c in $(gh issue list --state open --limit 200 --json number,labels --jq \
+            # Next queued issue: lowest number with the queue label and an owner, not needs-human
+            # or blocked, no open PR yet.
+            for c in $(gh issue list --state open --limit 200 --label "$QUEUE" --json number,labels --jq \
                 '[.[] | select(any(.labels[]; .name | startswith("agent-ready:")))
                       | select(all(.labels[]; .name != "needs-human" and .name != "blocked"))
                       | .number] | sort | .[]'); do
               author=$(gh issue view "$c" --json author --jq .author.login)
               if can_write "$author" && ! has_open_pr "$c"; then n=$c; break; fi
             done
-            [ -n "$n" ] || { echo "No agent-ready issue to build."; exit 0; }
+            [ -n "$n" ] || { echo "No $QUEUE issue to build."; exit 0; }
           fi
 
           meta=$(gh issue view "$n" --json state,author,labels)
@@ -101,12 +107,13 @@ jobs:
           fi
           owners=$(jq -r '.labels[].name | select(startswith("agent-ready:")) | sub("^agent-ready:"; "")' <<< "$meta")
           if [ "$(grep -c . <<< "$owners" || true)" != 1 ]; then
-            say "Add exactly one \`agent-ready:<username>\` label to say who owns this issue, then add \`agent-now\` again."; exit 0
+            say "Add exactly one \`agent-ready:<username>\` label to say who owns this issue, then remove and re-add \`agent-queue\`."; exit 0
           fi
           owner=$owners
           if ! can_write "$owner"; then say "\`$owner\` has no write access here, so they can't own an agent PR."; exit 0; fi
           if has_open_pr "$n"; then say "There is already an open PR from \`claude/issue-$n\`."; exit 0; fi
 
+          gh issue edit "$n" --add-assignee "$owner" || true
           echo "Building #$n for @$owner"
           { echo "number=$n"; echo "owner=$owner"; } >> "$GITHUB_OUTPUT"
 
@@ -170,7 +177,8 @@ jobs:
           set -euo pipefail
           pr=$(gh pr list --state open --head "claude/issue-$N" --json number --jq '.[0].number // empty')
           if [ -n "$pr" ]; then
-            gh pr edit "$pr" --add-assignee "$OWNER" --add-label "agent-ready:$OWNER" || true
+            gh pr edit "$pr" --add-assignee "$OWNER" --add-label "agent,agent-ready:$OWNER" || true
+            for l in agent-queue agent-night; do gh issue edit "$N" --remove-label "$l" || true; done
             gh pr edit "$pr" --add-reviewer "$OWNER" || echo "Could not request a review from $OWNER (PR author?)."
             gh issue comment "$N" --body "Draft PR #$pr is up for @$OWNER. Mark it ready for review when you're happy; the agent reviewer runs then."
             exit 0

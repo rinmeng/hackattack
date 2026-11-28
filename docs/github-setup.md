@@ -4,13 +4,13 @@ One-time settings for CI, the agent reviewer and the coding agent. A repo admin 
 
 ## Workflows
 
-| Workflow       | Starts on                               | Does                                                                               |
-| -------------- | --------------------------------------- | ---------------------------------------------------------------------------------- |
-| `CI`           | every PR and push to `main`             | format, lint, typecheck; build and `db-types` only when the change can affect them |
-| `agent-review` | ready PRs, `/review`, `review:request`  | Claude approves the PR or requests changes                                         |
-| `agent-build`  | `agent-now` label, manual run, nightly  | Claude builds an `agent-ready:<username>` issue and opens a draft PR for them      |
-| `pr-hygiene`   | PR opened or edited                     | branch prefix and Conventional Commit title                                        |
-| `labels`       | `.github/labels.json` changes on `main` | creates and updates the labels                                                     |
+| Workflow       | Starts on                                | Does                                                                               |
+| -------------- | ---------------------------------------- | ---------------------------------------------------------------------------------- |
+| `CI`           | every PR and push to `main`              | format, lint, typecheck; build and `db-types` only when the change can affect them |
+| `agent-review` | ready PRs, `/review`, `review:request`   | Claude approves the PR or requests changes                                         |
+| `agent-build`  | `agent-queue` label, manual run, nightly | Claude builds an `agent-ready:<username>` issue and opens a draft PR for them      |
+| `pr-hygiene`   | PR opened or edited                      | branch prefix and Conventional Commit title                                        |
+| `labels`       | `.github/labels.json` changes on `main`  | creates and updates the labels                                                     |
 
 ## Secrets and variables
 
@@ -43,8 +43,14 @@ an `agent-ready:<their username>` entry to `.github/labels.json`.
 
 - `agent-ready:<username>`: the issue is ready for the agent, and that person owns it. They get the
   PR assigned and a review request. Adding it starts nothing.
-- `agent-now`: build it now. The issue needs exactly one `agent-ready:<username>` label, must be
-  opened by someone with write access, and the label must be added by someone with write access.
+- `agent-queue`: build it now (adding the label starts the run). The issue needs exactly one
+  `agent-ready:<username>` label, must be opened by someone with write access, and the label must
+  be added by someone with write access. A manual run with no issue number takes the lowest
+  `agent-queue` issue.
+- `agent-night`: only the nightly run picks it up (needs `ENABLE_NIGHTLY=true`).
+- Queue labels stay on the issue until its PR opens, then are removed. To retry, remove
+  `agent-queue` and add it again.
+- `agent`: set on PRs the agent opened.
 - `needs-human`, `blocked`: the agent skips the issue.
 - `review:pass`, `review:changes`: set by the reviewer. `review:request`, `review:rerequest`: ask
   for a (re-)review; removed when the run starts.

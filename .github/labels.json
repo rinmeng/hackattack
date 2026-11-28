@@ -2,27 +2,37 @@
   {
     "name": "agent-ready:rinmeng",
     "color": "7057ff",
-    "description": "Ready for the coding agent; @rinmeng owns it and reviews the PR"
+    "description": "Ready for the agent; @rinmeng owns it, is assigned, and reviews the PR"
   },
   {
     "name": "agent-ready:KitheK",
     "color": "7057ff",
-    "description": "Ready for the coding agent; @KitheK owns it and reviews the PR"
+    "description": "Ready for the agent; @KitheK owns it, is assigned, and reviews the PR"
   },
   {
     "name": "agent-ready:BrendenJones1",
     "color": "7057ff",
-    "description": "Ready for the coding agent; @BrendenJones1 owns it and reviews the PR"
+    "description": "Ready for the agent; @BrendenJones1 owns it, is assigned, and reviews the PR"
   },
   {
     "name": "agent-ready:GlowyBlack",
     "color": "7057ff",
-    "description": "Ready for the coding agent; @GlowyBlack owns it and reviews the PR"
+    "description": "Ready for the agent; @GlowyBlack owns it, is assigned, and reviews the PR"
   },
   {
-    "name": "agent-now",
+    "name": "agent-queue",
     "color": "8a63d2",
-    "description": "Build this issue now (needs one agent-ready:<username> label; removed when the run starts)"
+    "description": "In the agent queue: adding it starts the build now (needs one agent-ready:<username>)"
+  },
+  {
+    "name": "agent-night",
+    "color": "5319e7",
+    "description": "The agent picks this up only at the scheduled night run"
+  },
+  {
+    "name": "agent",
+    "color": "1d76db",
+    "description": "Built by the coding agent"
   },
   {
     "name": "needs-human",
@@ -34,7 +44,11 @@
     "color": "ededed",
     "description": "Waiting on something else; the agent skips it"
   },
-  { "name": "review:pass", "color": "0e8a16", "description": "Agent reviewer approved" },
+  {
+    "name": "review:pass",
+    "color": "0e8a16",
+    "description": "Agent reviewer approved"
+  },
   {
     "name": "review:changes",
     "color": "d93f0b",
