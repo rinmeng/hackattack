@@ -1,5 +1,6 @@
 export * from './auth';
 export * from './toast';
+export * from './sonar';
 export type {
   Database,
   Enums,
