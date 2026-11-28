@@ -1,0 +1,67 @@
+[
+  {
+    "name": "agent-ready:rinmeng",
+    "color": "7057ff",
+    "description": "Ready for the agent; @rinmeng owns it, is assigned, and reviews the PR"
+  },
+  {
+    "name": "agent-ready:KitheK",
+    "color": "7057ff",
+    "description": "Ready for the agent; @KitheK owns it, is assigned, and reviews the PR"
+  },
+  {
+    "name": "agent-ready:BrendenJones1",
+    "color": "7057ff",
+    "description": "Ready for the agent; @BrendenJones1 owns it, is assigned, and reviews the PR"
+  },
+  {
+    "name": "agent-ready:GlowyBlack",
+    "color": "7057ff",
+    "description": "Ready for the agent; @GlowyBlack owns it, is assigned, and reviews the PR"
+  },
+  {
+    "name": "agent-queue",
+    "color": "8a63d2",
+    "description": "In the agent queue: adding it starts the build now (needs one agent-ready:<username>)"
+  },
+  {
+    "name": "agent-night",
+    "color": "5319e7",
+    "description": "The agent picks this up only at the scheduled night run"
+  },
+  {
+    "name": "agent",
+    "color": "1d76db",
+    "description": "Built by the coding agent"
+  },
+  {
+    "name": "needs-human",
+    "color": "000000",
+    "description": "Needs a person's judgement, data or decision; the agent skips it"
+  },
+  {
+    "name": "blocked",
+    "color": "ededed",
+    "description": "Waiting on something else; the agent skips it"
+  },
+  {
+    "name": "review:pass",
+    "color": "0e8a16",
+    "description": "Agent reviewer approved"
+  },
+  {
+    "name": "review:changes",
+    "color": "d93f0b",
+    "description": "Agent reviewer requested changes"
+  },
+  {
+    "name": "review:request",
+    "color": "fef2c0",
+    "description": "Run the agent review (removed when the run starts)"
+  },
+  {
+    "name": "review:rerequest",
+    "color": "fef2c0",
+    "description": "Re-review the full diff against prior findings (removed when the run starts)"
+  }
+]

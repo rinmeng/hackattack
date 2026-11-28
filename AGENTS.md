@@ -76,7 +76,7 @@ For setup and onboarding (env vars, local Supabase, seeded login, deploying), se
 - Apply with `pnpm exec supabase migration up`, which keeps local data. Don't run `pnpm db:reset` without asking, because it wipes the local database.
 - `supabase/seed.sql` is local-only test data. Never put anything there that a hosted project depends on.
 
-**Database types:** `lib/types/database.ts` is generated (its header says so), so never edit it by hand. After any migration, run `pnpm db:types` and commit the result with the migration. The `Database types` CI workflow regenerates it from the migrations and fails the PR if the file doesn't match. Use the generated helpers for row types (`Tables<'todos'>`, `TablesInsert<'todos'>`, `TablesUpdate<'todos'>` from `@/lib/types`) instead of writing interfaces that duplicate table columns. If a query fails typecheck, the schema or the query is wrong; don't cast it away with `as` or `any`.
+**Database types:** `lib/types/database.ts` is generated (its header says so), so never edit it by hand. After any migration, run `pnpm db:types` and commit the result with the migration. The `db-types` job in CI regenerates it from the migrations and fails the PR if the file doesn't match. Use the generated helpers for row types (`Tables<'todos'>`, `TablesInsert<'todos'>`, `TablesUpdate<'todos'>` from `@/lib/types`) instead of writing interfaces that duplicate table columns. If a query fails typecheck, the schema or the query is wrong; don't cast it away with `as` or `any`.
 
 **Env vars:** add every new variable to `.env.example` with a comment saying what it's for and whether it's public. Only `NEXT_PUBLIC_*` values reach the browser.
 
@@ -159,7 +159,7 @@ pnpm format
 pnpm check   # format:check + lint + typecheck
 ```
 
-CI runs `format:check`, `lint`, `typecheck`, and `build` (with no Supabase env vars) on every push and PR. For changes that affect routing, rendering, or config, also run `pnpm build`. If you added a migration, run `pnpm db:types`, include the regenerated file, and confirm `pnpm db:types:check` passes.
+CI runs `format:check`, `lint`, and `typecheck` on every push and PR, plus `build` (with no Supabase env vars) whenever anything other than docs changed, and `db-types` whenever migrations or dependencies changed. The single required check is `ci`. For changes that affect routing, rendering, or config, also run `pnpm build`. If you added a migration, run `pnpm db:types`, include the regenerated file, and confirm `pnpm db:types:check` passes.
 
 Never claim a check passed without running it. If something fails and you can't fix it, say so and include the error.
 
@@ -205,6 +205,12 @@ Track work in GitHub issues so everyone, human or agent, can see what's planned,
 - **File, don't fix, what's out of scope.** If you find a bug or follow-up outside the current task, don't fix it in the same change. Offer to open an issue for it with the Task template.
 - **Ask before creating, editing, or closing issues.** They're visible to the whole team. Draft the issue in chat first, then create it with `gh issue create` once the user agrees.
 - For a big feature, link the issue from its `plan.md`, and the plan from the issue.
+
+## Agent Review and Agent Labels
+
+Every ready PR gets an independent review from Claude (`.github/workflows/agent-review.yml`, rubric in `.github/review-prompt.md`). It **approves** the PR or **requests changes**, and sets `review:pass` or `review:changes`. After fixing what it found, comment `/rereview`. Write code it can verify: meet each "Done when" item literally and follow the rules in this file.
+
+Issues the coding agent may build carry an `agent-ready:<username>` label naming the teammate who owns the result. Adding `agent-queue` starts a build now, and `agent-night` queues it for the nightly run (`.github/workflows/agent-build.yml`): Claude opens a draft PR from `claude/issue-<N>`, assigned to that teammate, with a review request. Label rules and setup are in [docs/github-setup.md](docs/github-setup.md). Agents never edit `.github/`, never merge, and never mark their own PR ready.
 
 ## Working on a Team
 

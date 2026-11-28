@@ -1,0 +1,29 @@
+name: review-context
+description: Fetch the PR, its diff and its linked issue into plain files, so a read-only reviewer needs no GitHub access.
+inputs:
+  pr:
+    required: true
+  github-token:
+    required: true
+  rereview:
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR: ${{ inputs.pr }}
+        REREVIEW: ${{ inputs.rereview }}
+      run: |
+        set -euo pipefail
+        gh pr view "$PR" --json title,body,author,headRefName,baseRefName,files > pr-meta.json
+        gh pr diff "$PR" > pr.diff
+        n=$(jq -r '.body // ""' pr-meta.json | grep -oiE '(closes|fixes|resolves) #[0-9]+' | head -n1 | grep -oE '[0-9]+' || true)
+        if [ -n "$n" ]; then gh issue view "$n" --comments > issue.md; else echo "No linked issue." > issue.md; fi
+        if [ "$REREVIEW" = "true" ]; then
+          gh pr view "$PR" --json comments,reviews > prior-review-comments.md
+        else
+          echo "Not a re-review run." > prior-review-comments.md
+        fi
