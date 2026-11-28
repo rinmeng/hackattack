@@ -1,6 +1,6 @@
 # Afterlife Sonar
 
-**Status:** Draft
+**Status:** MVP built, awaiting hardware testing
 **Issue:** None yet
 **Owner:** Rin Meng
 **Last updated:** 2026-11-27
@@ -45,9 +45,9 @@ All commits go on `feature/afterlife-sonar` and ship as one PR, since the page i
 
 1. [ ] Hardware check: show the spectrum view on every teammate's laptop and pick the demo laptop (hour 0 to 1)
 2. [ ] Stereo test: does a left-to-right wave reliably hit tone L before tone R? Choose Mode A or Mode B as the default (hour 1 to 3)
-3. [ ] `feat(sonar): add audio engine and calibration` (types, constants, dsp, audio engine, calibrator)
-4. [ ] `feat(sonar): add gesture detector` (gating, state machine, events)
-5. [ ] `feat(sonar): add sonar page ui` (hook, components, page, Navbar link)
+3. [x] `feat(sonar): add audio engine and calibration` (types, constants, dsp, audio engine, calibrator)
+4. [x] `feat(sonar): add gesture detector` (gating, state machine, events)
+5. [x] `feat(sonar): add sonar page ui` (hook, components, page, Navbar link)
 6. [ ] Tune the noise layers with the dancing test (hour 8 to 12)
 7. [ ] Stretch: one real app on top, such as slide control or recipe scrolling (hour 12 to 18)
 8. [ ] Polish, rehearse the demo script in [research.md](research.md#demo-script-about-2-minutes), and record a backup video (hour 18 to 24)
@@ -57,6 +57,9 @@ All commits go on `feature/afterlife-sonar` and ship as one PR, since the page i
 
 - 2026-11-27: Chrome on a MacBook with built-in speakers and mic is the only supported setup. Safari filters high frequencies (WebKit bug 192932), and Firefox historically ignored `echoCancellation: false`.
 - 2026-11-27: Detection uses hand-written rules, not machine learning. Debounce, cooldown and gating thresholds come from SoundWave.
+- 2026-11-27: The sweep glides the oscillators (phase-continuous, click-free) instead of a 50 ms gain dip per step, since a dip wouldn't fit an 80 ms step. It also runs the analyser at fftSize 2048, so each 80 ms step clears the previous candidate (a 4096 window is 85 ms).
+- 2026-11-27: The continuous-motion block tolerates 200 ms gaps in a tone's motion, because Doppler crosses zero each time a waving hand reverses.
+- 2026-11-27: Form labels use the shadcn `Label`, because `Text` doesn't accept `htmlFor`.
 - 2026-11-27: Only new files, plus one line each in `components/Navbar.tsx` and `lib/types/index.ts`, so the work never conflicts with other teams' branches.
 
 ## Open questions
@@ -73,4 +76,4 @@ All commits go on `feature/afterlife-sonar` and ship as one PR, since the page i
 - [ ] Clapping, jingling keys and typing fire nothing
 - [ ] A person moving 2 m behind the laptop fires nothing, and 5 s of continuous waving shows "Too much motion"
 - [ ] Stop silences the tones with no click, switching tabs pauses detection, and leaving `/sonar` releases the mic
-- [ ] `pnpm format`, `pnpm check` and `pnpm build` pass
+- [x] `pnpm format`, `pnpm check` and `pnpm build` pass
